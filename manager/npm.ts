@@ -1,10 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, X509Certificate } from 'node:crypto';
 
 type NpmCredentials = { identity: string; secret: string };
-type NpmCertificate = { id: number; domain_names: string[]; provider: string };
-type NpmProxyHost = { id: number; domain_names: string[]; forward_host: string; forward_port: number; certificate_id?: number; ssl_forced?: boolean };
+type NpmCertificate = { id: number; domain_names: string[]; provider: string; meta?: { certificate?: string } };
+type NpmProxyHost = { id: number; domain_names: string[]; forward_host: string; forward_port: number; certificate_id?: number; ssl_forced?: boolean; meta?: { nginx_online?: boolean; nginx_err?: string | null } };
 
 export class NpmApiError extends Error {
   constructor(readonly status: number, message = 'A API do Nginx Proxy Manager recusou a operação.') {
@@ -32,10 +32,11 @@ export class NpmClient {
 
   private async request<T>(method: string, endpoint: string, payload?: unknown, retried = false): Promise<T> {
     if (!this.token && endpoint !== '/tokens') await this.authenticate();
+    const multipart = payload instanceof FormData;
     const response = await this.fetcher(new URL(endpoint.replace(/^\//, ''), `${this.baseUrl.replace(/\/$/, '')}/`), {
       method,
-      headers: { ...(payload === undefined ? {} : { 'content-type': 'application/json' }), ...(this.token ? { authorization: `Bearer ${this.token}` } : {}) },
-      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+      headers: { ...(payload === undefined || multipart ? {} : { 'content-type': 'application/json' }), ...(this.token ? { authorization: `Bearer ${this.token}` } : {}) },
+      ...(payload === undefined ? {} : { body: multipart ? payload : JSON.stringify(payload) }),
       signal: AbortSignal.timeout(method === 'POST' && endpoint === '/nginx/certificates' ? 180_000 : 20_000),
     });
     if (response.status === 401 && endpoint !== '/tokens' && !retried) {
@@ -57,7 +58,10 @@ export class NpmClient {
   async ensureCertificate(input: { host: string; publicMode: boolean; email?: string; localCertificate?: { certificate: string; key: string; domainNames?: string[] } }): Promise<number> {
     const certificates = await this.request<NpmCertificate[]>('GET', '/nginx/certificates');
     const existing = certificates.find((certificate) => (certificate.domain_names?.includes(input.host) || certificate.domain_names?.some((domain) => domain.startsWith('*.') && input.host.endsWith(domain.slice(1)))) && (input.publicMode ? certificate.provider === 'letsencrypt' : certificate.provider === 'other'));
-    if (existing) return existing.id;
+    if (existing) {
+      if (!input.publicMode && input.localCertificate) await this.uploadLocalCertificate(existing.id, input.localCertificate);
+      return existing.id;
+    }
     const payload = input.publicMode
       ? { provider: 'letsencrypt', nice_name: `MagisForm ${input.host}`, domain_names: [input.host], meta: { dns_challenge: false } }
       : input.localCertificate
@@ -66,18 +70,40 @@ export class NpmClient {
     if (!payload) throw new Error('Certificado de teste ausente para o domínio local.');
     const created = await this.request<{ id: number }>('POST', '/nginx/certificates', payload);
     if (!created.id) throw new NpmApiError(502, 'A API NPM não retornou o certificado criado.');
+    if (!input.publicMode && input.localCertificate) await this.uploadLocalCertificate(created.id, input.localCertificate);
     return created.id;
+  }
+
+  private async uploadLocalCertificate(id: number, input: { certificate: string; key: string }): Promise<void> {
+    // O cadastro JSON não grava os PEMs no volume do NPM; o upload é obrigatório.
+    const files = new FormData();
+    files.append('certificate', new Blob([input.certificate], { type: 'application/x-pem-file' }), 'certificate.pem');
+    files.append('certificate_key', new Blob([input.key], { type: 'application/x-pem-file' }), 'privkey.pem');
+    await this.request('POST', `/nginx/certificates/${id}/upload`, files);
   }
 
   async ensureLocalCertificate(input: { domainNames: string[]; certificate: string; key: string }): Promise<number> {
     const certificates = await this.request<NpmCertificate[]>('GET', '/nginx/certificates');
-    const existing = certificates.find((certificate) => certificate.provider === 'other' && input.domainNames.every((name) => certificate.domain_names?.includes(name)));
-    if (existing) return existing.id;
+    const existing = certificates.find((certificate) => {
+      if (certificate.provider !== 'other') return false;
+      if (input.domainNames.every((name) => certificate.domain_names?.includes(name))) return true;
+      // Após upload, o NPM lista somente o CN; confira os SANs do PEM para reutilizar o ID.
+      if (!certificate.meta?.certificate) return false;
+      try {
+        const pem = new X509Certificate(certificate.meta.certificate);
+        return input.domainNames.every((name) => Boolean(pem.checkHost(name)));
+      } catch { return false; }
+    });
+    if (existing) {
+      await this.uploadLocalCertificate(existing.id, input);
+      return existing.id;
+    }
     const created = await this.request<{ id: number }>('POST', '/nginx/certificates', {
       provider: 'other', nice_name: `MagisForm teste ${input.domainNames[0]}`, domain_names: input.domainNames,
       meta: { certificate: input.certificate, certificate_key: input.key },
     });
     if (!created.id) throw new NpmApiError(502, 'A API NPM não retornou o certificado local criado.');
+    await this.uploadLocalCertificate(created.id, input);
     return created.id;
   }
 
@@ -94,11 +120,13 @@ export class NpmClient {
     if (existing) {
       if (existing.forward_host !== input.forwardHost || existing.forward_port !== input.forwardPort) throw new Error('O domínio já pertence a um Proxy Host com destino diferente.');
       if (existing.certificate_id !== input.certificateId || existing.ssl_forced !== input.secure) throw new Error('O domínio já pertence a um Proxy Host com configuração TLS divergente.');
-      await this.request('PUT', `/nginx/proxy-hosts/${existing.id}`, payload);
+      const repaired = await this.request<NpmProxyHost>('PUT', `/nginx/proxy-hosts/${existing.id}`, payload);
+      if (repaired.meta?.nginx_online === false) throw new NpmApiError(502, 'O Nginx recusou a configuração do Proxy Host. Verifique o certificado e o destino no NPM.');
       return existing.id;
     }
-    const created = await this.request<{ id: number }>('POST', '/nginx/proxy-hosts', payload);
+    const created = await this.request<NpmProxyHost>('POST', '/nginx/proxy-hosts', payload);
     if (!created.id) throw new NpmApiError(502, 'A API NPM não retornou o Proxy Host criado.');
+    if (created.meta?.nginx_online === false) throw new NpmApiError(502, 'O Nginx recusou a configuração do Proxy Host. Verifique o certificado e o destino no NPM.');
     return created.id;
   }
 
