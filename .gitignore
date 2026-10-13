@@ -76,6 +76,7 @@ docs/plans/progress/*
 docs/deployment/*
 !docs/deployment/tenant-installations.md
 !docs/deployment/management-console.md
+!docs/deployment/manager-installation-runbook.md
 .playwright-cli/
 
 # Configuração e segredos locais por instalação (o catálogo também é operacional local)

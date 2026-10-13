@@ -1,5 +1,7 @@
 # Console de gestão MagisForm
 
+Para a implantação completa em VM nova, incluindo os caminhos local sem DNS e público com DNS, siga o [runbook de implantação do gestor](manager-installation-runbook.md).
+
 ## Instalação automática em Ubuntu 24.04 e 26.04
 
 Em uma VM limpa Ubuntu Server 24.04 ou 26.04 amd64, execute como root ou com `sudo`:
