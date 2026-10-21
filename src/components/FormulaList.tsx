@@ -60,6 +60,7 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
   const [pendingDeliveryConfirmation, setPendingDeliveryConfirmation] = useState<{ formula: Formula; deliveryStatus: 'aguardando_retirada' | 'entregue' } | null>(null);
   const [updatingDeliveryId, setUpdatingDeliveryId] = useState<number | null>(null);
   const [verifyingId, setVerifyingId] = useState<number | null>(null);
+  const [pendingUnverification, setPendingUnverification] = useState<Formula | null>(null);
   const [editingPayment, setEditingPayment] = useState<Formula | null>(null);
   const now = new Date();
   const [summaryMonth, setSummaryMonth] = useState(now.getMonth());
@@ -104,6 +105,21 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
       await reload();
     } catch (err: any) {
       alert('Erro ao verificar fórmula: ' + (err?.message ?? 'verifique a conexão com o servidor.'));
+    } finally {
+      setVerifyingId(null);
+    }
+  };
+
+  const unverifyFormula = async () => {
+    const formula = pendingUnverification;
+    if (!formula || verifyingId !== null) return;
+    setPendingUnverification(null);
+    setVerifyingId(formula.id);
+    try {
+      await db.formulas.unverify(formula.id);
+      await reload();
+    } catch (err: any) {
+      alert('Erro ao desverificar fórmula: ' + (err?.message ?? 'verifique a conexão com o servidor.'));
     } finally {
       setVerifyingId(null);
     }
@@ -371,12 +387,13 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
                       </button>
                     </div>
                     {canVerify && (
-                      <div data-label="Verificação" className="flex justify-start" onClick={e => e.stopPropagation()}>
+                      <div data-label="Verificação" className="flex justify-start" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
                         <button
                           type="button"
-                          disabled={!!f.manager_verified || verifyingId === f.id}
-                          aria-label={f.manager_verified ? 'Fórmula verificada' : `Verificar fórmula de ${f.customer_name}`}
-                          onClick={() => void verifyFormula(f)}
+                          disabled={verifyingId !== null}
+                          aria-label={f.manager_verified ? `Desverificar fórmula de ${f.customer_name}` : `Verificar fórmula de ${f.customer_name}`}
+                          title={f.manager_verified ? 'Remover verificação' : undefined}
+                          onClick={() => { if (f.manager_verified) setPendingUnverification(f); else void verifyFormula(f); }}
                           className={`ui-button rounded-lg border px-2.5 py-1.5 text-xs font-bold whitespace-nowrap transition-colors disabled:cursor-default ${f.manager_verified ? 'border-success-line bg-success-soft text-success' : 'border-danger-line bg-danger-soft text-danger hover:bg-danger-strong disabled:opacity-60'}`}
                         >
                           {verifyingId === f.id ? 'Salvando...' : f.manager_verified ? 'Verificado' : 'Verificar'}
@@ -512,6 +529,15 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
         onClose={() => setEditingPayment(null)}
         onSaved={() => { setEditingPayment(null); void Promise.all([reload(), reloadSummary()]).catch(() => {}); }} />
     )}
+    <ConfirmModal
+      isOpen={!!pendingUnverification}
+      title="Desverificar fórmula"
+      message={`Deseja remover a verificação da fórmula de ${pendingUnverification?.customer_name ?? ''}?`}
+      confirmLabel="Sim"
+      cancelLabel="Não"
+      onConfirm={() => { void unverifyFormula(); }}
+      onClose={() => setPendingUnverification(null)}
+    />
     <ConfirmModal
       isOpen={!!pendingDeliveryConfirmation}
       title={pendingDeliveryConfirmation?.deliveryStatus === 'entregue' ? 'Confirmar entrega' : 'Aguardando retirada'}

@@ -106,6 +106,7 @@ export const httpBusinessAdapter = {
     updateDeliveryStatus: (id: number, status: string) => result(request(`${idPath('/formulas', id)}/delivery-status`, 'PATCH', { status }, 'user')),
     updatePayment: (id: number, payment: import('../../shared/contracts').FormulaPaymentUpdate) => result(request(`${idPath('/formulas', id)}/payment`, 'PATCH', payment, 'user')),
     verify: (id: number) => result(request(`${idPath('/formulas', id)}/verification`, 'POST', {}, 'user')),
+    unverify: (id: number) => result(request(`${idPath('/formulas', id)}/verification`, 'DELETE', undefined, 'user')),
     updateDeliveriesStatus: (ids: number[], status: string) => result(request('/formulas/delivery-status-batch', 'PATCH', { ids, status }, 'user')),
     remove: (id: number, credentials?: Parameters<BusinessOperations['formulas']['remove']>[1]) => result(request(idPath('/formulas', id), 'DELETE', credentials ?? {}, 'user')),
   },

@@ -169,8 +169,18 @@ describe.skipIf(!enabled)('API HTTP com MariaDB isolado', () => {
     expect(manager.statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/api/v1/auth/me', headers: managerSession.headers })).json().data.user.role).toBe('manager');
     expect((await app.inject({ method: 'POST', url: `/api/v1/formulas/${formulaId}/verification`, headers: managerSession.headers, payload: {} })).statusCode).toBe(200);
+    const verificationUrl = `/api/v1/formulas/${formulaId}/verification`;
+    expect((await app.inject({ method: 'DELETE', url: verificationUrl, headers: webHeaders })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'DELETE', url: verificationUrl, headers: { origin: managerSession.headers.origin } })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'DELETE', url: verificationUrl, headers: { ...managerSession.headers, origin: 'https://outra-origem.example' } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'DELETE', url: verificationUrl, headers: { cookie: managerSession.headers.cookie, origin: managerSession.headers.origin } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: `/api/v1/formulas/${formulaId}`, headers: managerSession.headers })).json().data.manager_verified).toBe(1);
+    expect((await app.inject({ method: 'DELETE', url: verificationUrl, headers: managerSession.headers })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `/api/v1/formulas/${formulaId}`, headers: managerSession.headers })).json().data.manager_verified).toBe(0);
+    expect((await app.inject({ method: 'POST', url: verificationUrl, headers: managerSession.headers, payload: {} })).statusCode).toBe(200);
     const employeeSession = await webLogin(app, 'employee-qa', 'senha', false);
     const employee = employeeSession.response;
+    expect((await app.inject({ method: 'DELETE', url: verificationUrl, headers: employeeSession.headers })).statusCode).toBe(403);
     expect((await app.inject({ method: 'GET', url: '/api/v1/customers', headers: employeeSession.headers })).statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/api/v1/logs', headers: employeeSession.headers })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: employeeSession.headers })).statusCode).toBe(200);

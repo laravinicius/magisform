@@ -244,6 +244,7 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
   addRoute('PATCH','/formulas/:id/delivery-status', wrapped(async (req) => db.updateFormulaDeliveryStatus(paramId(req), parsed(statusBody,req.body).status)), { ...common, mutating: true, validation: statusBody });
   addRoute('PATCH','/formulas/:id/payment', wrapped(async (req) => db.updateFormulaPayment(paramId(req), (() => { const payment = parsed(paymentUpdate,req.body); return { payment_status: payment.payment_status, partial_payment_amount: payment.partial_payment_amount ?? null }; })())), { ...common, mutating: true, validation: paymentUpdate });
   addRoute('POST','/formulas/:id/verification', wrapped(async (req) => db.verifyFormula(paramId(req))), { ...common, mutating: true });
+  addRoute('DELETE','/formulas/:id/verification', wrapped(async (req) => db.unverifyFormula(paramId(req))), { ...common, mutating: true });
   addRoute('PATCH','/formulas/delivery-status-batch', wrapped(async (req) => { const b = parsed(deliveryBatch,req.body); return db.updateFormulasDeliveryStatus(b.ids,b.status); }), { ...common, mutating: true, validation: deliveryBatch });
   addRoute('GET','/logs', wrapped(async (req) => {
     const q = parsed(logQuery, req.query);

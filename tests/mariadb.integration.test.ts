@@ -219,6 +219,18 @@ describe.skipIf(!process.env.MARIADB_HOST)('autenticação e autorização comun
     expect(verified[0].manager_verified).toBe(1);
     const [audit] = await connection.execute<mysql.RowDataPacket[]>('SELECT user_id,user_name FROM action_logs WHERE entity="formulas" AND entity_id=? AND action="verify"', [formula.insertId]);
     expect(audit[0]).toMatchObject({ user_id: managerId, user_name: 'manager-qa' });
+    await expect(db.withSessionContext(employee.sessionToken, () => db.unverifyFormula(formula.insertId))).rejects.toThrow('Apenas o perfil Gerente');
+    await expect(db.unverifyFormula(formula.insertId)).rejects.toThrow('Apenas o perfil Gerente');
+    await db.withSessionContext(manager.sessionToken, () => db.unverifyFormula(formula.insertId));
+    const [unverified] = await connection.execute<mysql.RowDataPacket[]>('SELECT manager_verified FROM formulas WHERE id=?', [formula.insertId]);
+    expect(unverified[0].manager_verified).toBe(0);
+    const [removalAudit] = await connection.execute<mysql.RowDataPacket[]>('SELECT user_id,user_name FROM action_logs WHERE entity="formulas" AND entity_id=? AND action="unverify"', [formula.insertId]);
+    expect(removalAudit).toHaveLength(1);
+    expect(removalAudit[0]).toMatchObject({ user_id: managerId, user_name: 'manager-qa' });
+    await db.withSessionContext(manager.sessionToken, () => db.verifyFormula(formula.insertId));
+    const [reverified] = await connection.execute<mysql.RowDataPacket[]>('SELECT manager_verified FROM formulas WHERE id=?', [formula.insertId]);
+    expect(reverified[0].manager_verified).toBe(1);
+    await expect(db.withSessionContext(manager.sessionToken, () => db.unverifyFormula(2147483647))).rejects.toThrow('Fórmula não encontrada.');
     await connection.execute('UPDATE sessions SET expires_at=DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE user_id=?', [employeeId]);
     expect((await db.getSessionUser(employee.sessionToken!)).user).toBeUndefined();
     expect((await db.heartbeat(employee.sessionToken!)).valid).toBe(false);

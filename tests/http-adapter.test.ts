@@ -27,6 +27,30 @@ describe('adapter web com cookie e CSRF', () => {
     } finally { cleanup(); }
   });
 
+  it('remove a verificação por HTTP com CSRF e notifica os dados', async () => {
+    fetchMock.mockResolvedValueOnce(ok({ csrfToken: 'csrf-qa' })).mockResolvedValueOnce(ok({ success: true }));
+    const changed = vi.fn();
+    const cleanup = db.data.onChanged(changed);
+    try {
+      expect(await db.formulas.unverify(42)).toEqual({ success: true });
+      const [url, options] = fetchMock.mock.calls[1];
+      expect(url).toBe('/api/v1/formulas/42/verification');
+      expect(options).toMatchObject({ method: 'DELETE', credentials: 'same-origin', headers: { 'X-CSRF-Token': 'csrf-qa' } });
+      expect(options.body).toBeUndefined();
+      expect(changed).toHaveBeenCalledOnce();
+    } finally { cleanup(); }
+  });
+
+  it('preserva os dados e propaga falha ao remover a verificação', async () => {
+    fetchMock.mockResolvedValueOnce(ok({ csrfToken: 'csrf-qa' })).mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Falha de conexão' } }), { status: 503 }));
+    const changed = vi.fn();
+    const cleanup = db.data.onChanged(changed);
+    try {
+      await expect(db.formulas.unverify(42)).rejects.toMatchObject({ status: 503 });
+      expect(changed).not.toHaveBeenCalled();
+    } finally { cleanup(); }
+  });
+
   it('renova o escopo ao entrar e restaura o usuário por cookie', async () => {
     fetchMock.mockResolvedValueOnce(ok({ csrfToken: 'csrf-qa' })).mockResolvedValueOnce(ok({ user: { id: 1, role: 'manager' } })).mockResolvedValueOnce(ok({ authenticated: true, user: { id: 1, role: 'manager' } }));
     const changed = vi.fn();

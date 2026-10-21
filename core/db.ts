@@ -1036,6 +1036,18 @@ const [r]: any = await conn.query(
     return { success: true };
   }
 
+  async unverifyFormula(id: number) {
+    const actor = contexts.getStore()?.user;
+    if (contexts.getStore()?.kind !== 'session' || actor?.role !== 'manager') throw new Error('Apenas o perfil Gerente pode desverificar fórmulas.');
+    const result: any = await this.q('UPDATE formulas SET manager_verified=0 WHERE id=?', [id]);
+    if (!result?.affectedRows) {
+      const existing = await this.q<any[]>('SELECT id FROM formulas WHERE id=?', [id]);
+      if (!existing.length) throw new Error('Fórmula não encontrada.');
+    }
+    await this.logAction({ id: actor.id, name: actor.name }, 'unverify', 'formulas', id, `Verificação da fórmula ${id} removida no Histórico.`);
+    return { success: true };
+  }
+
   async updateFormulasDeliveryStatus(ids: number[], deliveryStatus: string, sessionToken?: string) {
     if (!ids.length) return { success: true };
     const actor = await this.resolveActor(sessionToken);
