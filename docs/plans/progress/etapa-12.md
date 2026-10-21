@@ -1,3 +1,5 @@
+> Registro histórico: a arquitetura desktop descrita neste documento foi superada pela aplicação exclusivamente web. Consulte `docs/architecture.md` para o fluxo vigente. Resultados de QA históricos não validam a versão atual.
+
 # Etapa 12 — Painel de gestão e provisionamento
 
 **Estado:** implementação base concluída e verificações locais aprovadas. Gate operacional pendente: a etapa 11 não foi aprovada; não houve publicação, provisionamento real, nem QA de ponta a ponta com várias instalações Docker.

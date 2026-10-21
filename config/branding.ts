@@ -1,7 +1,7 @@
 // ─── Configuração central de marca ────────────────────────────────────────────
-// Único arquivo que diferencia a versão genérica das versões por cliente.
+// Identidade padrão, compartilhada pelos componentes da aplicação web.
 // Sempre importe as cores da marca daqui (e não hex solto nos componentes),
-// para que trocar de cliente = apenas editar este arquivo.
+// A configuração pública da instalação aplica a marca do cliente no navegador.
 
 export const BRAND = {
   name: 'MagisForm',

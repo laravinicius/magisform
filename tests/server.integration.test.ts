@@ -1,12 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import net from 'node:net';
 import mysql from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildApp } from '../server/app.js';
 import { loadConfig } from '../server/config.js';
-import { invokeRemote, loginRemote } from '../electron/remoteAdapter';
+import { webLogin } from './fixtures/webSession';
 
 const base = { host: process.env.MARIADB_HOST ?? '127.0.0.1', port: Number(process.env.MARIADB_PORT ?? 3306), user: process.env.MARIADB_USER ?? 'root', password: process.env.MARIADB_PASSWORD ?? '' };
 const database = `magisform_server_${crypto.randomBytes(4).toString('hex')}`;
@@ -26,9 +25,8 @@ describe.skipIf(!enabled)('API HTTP com MariaDB isolado', () => {
     const password = crypto.createHash('sha256').update('senha-de-teste').digest('hex');
     await pool.execute('INSERT INTO users(name,username,password,role) VALUES(?,?,?,?)', ['Admin QA', 'admin-qa', password, 'admin']);
     await pool.execute('INSERT INTO users(name,username,password,role) VALUES(?,?,?,?)', ['Gerente QA', 'manager-qa', password, 'manager']);
-    await pool.execute('INSERT INTO users(name,username,password,role) VALUES(?,?,?,?)', ['Electron remoto QA', 'electron-remote-qa', password, 'admin']);
     await pool.execute('INSERT INTO users(name,username,password,role) VALUES(?,?,?,?)', ['Browser QA', 'browser-qa', password, 'admin']);
-    await pool.execute('INSERT INTO schema_version(singleton,version,source,checksum) VALUES(1,2,?,?)', ['bootstrap', '0'.repeat(64)]);
+    await pool.execute('INSERT INTO schema_version(singleton,version,source,checksum) VALUES(1,3,?,?)', ['bootstrap', '0'.repeat(64)]);
     const config = loadConfig({ NODE_ENV: 'test', MAGISFORM_SERVER_HOST: '127.0.0.1', MAGISFORM_SERVER_PORT: '3001', MAGISFORM_SERVER_DB_HOST: base.host, MAGISFORM_SERVER_DB_PORT: String(base.port), MAGISFORM_SERVER_DB_NAME: database, MAGISFORM_SERVER_DB_USER: base.user, MAGISFORM_SERVER_DB_PASSWORD: base.password });
     app = await buildApp({ config, pool, closePool: false });
   }, 30_000);
@@ -47,6 +45,10 @@ describe.skipIf(!enabled)('API HTTP com MariaDB isolado', () => {
     expect(ready.statusCode).toBe(200);
     const openapi = await app.inject({ method: 'GET', url: '/api/docs/json' });
     expect(openapi.statusCode).toBe(200);
+    expect(openapi.json().paths['/api/v1/auth/desktop/login']).toBeUndefined();
+    expect(openapi.json().components.securitySchemes.BearerAuth).toBeUndefined();
+    expect((await app.inject({ method: 'POST', url: '/api/v1/auth/desktop/login', payload: {} })).statusCode).toBe(404);
+    expect((await app.inject({ url: '/api/v1/customers', headers: { authorization: 'Bearer ' + 'a'.repeat(64) } })).statusCode).toBe(400);
     expect(openapi.json().paths['/api/v1/customers'].post.requestBody).toBeDefined();
     expect(openapi.json().components.schemas.UserDto).toBeDefined();
     expect(JSON.stringify(ready.json())).not.toMatch(/password|sql|host/i);
@@ -96,10 +98,10 @@ describe.skipIf(!enabled)('API HTTP com MariaDB isolado', () => {
     expect(invalid.statusCode).toBe(400);
     expect(JSON.stringify(invalid.json())).not.toMatch(/stack|sql|password/i);
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const failedLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/desktop/login', payload: { username: 'rate-limit-qa', password: 'senha-incorreta' } });
+      const failedLogin = await app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: { origin: 'http://127.0.0.1:3001', cookie: csrfCookie, 'x-csrf-token': csrfToken }, payload: { username: 'rate-limit-qa', password: 'senha-incorreta' } });
       expect(failedLogin.statusCode).toBe(401);
     }
-    const limited = await app.inject({ method: 'POST', url: '/api/v1/auth/desktop/login', payload: { username: 'rate-limit-qa', password: 'senha-incorreta' } });
+    const limited = await app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: { origin: 'http://127.0.0.1:3001', cookie: csrfCookie, 'x-csrf-token': csrfToken }, payload: { username: 'rate-limit-qa', password: 'senha-incorreta' } });
     expect(limited.statusCode).toBe(429);
     expect((await app.inject({ method: 'GET', url: '/api/v1/auth/setup' })).statusCode).toBe(404);
     expect((await app.inject({ method: 'GET', url: '/api/v1/database' })).statusCode).toBe(404);
@@ -129,7 +131,7 @@ describe.skipIf(!enabled)('API HTTP com MariaDB isolado', () => {
     expect((await app.inject({ method: 'GET', url: '/api/v1/public-config' })).json().data).toMatchObject({ installationName: 'MagisForm', brand: 'MagisForm' });
     expect((await app.inject({ method: 'GET', url: '/api/v1/customers', headers: { ...webHeaders, authorization: `Bearer ${webToken}` } })).statusCode).toBe(400);
     expect((await app.inject({ method: 'POST', url: '/api/v1/customers', headers: { cookie: `${csrfCookie}; ${sessionCookie}` }, payload: { name: 'CSRF negado', phone: '5511000000000' } })).statusCode).toBe(403);
-    const conflict = await app.inject({ method: 'POST', url: '/api/v1/auth/desktop/login', payload: { username: 'admin-qa', password: 'senha-de-teste' } });
+    const conflict = await app.inject({ method: 'POST', url: '/api/v1/auth/login', headers: webHeaders, payload: { username: 'admin-qa', password: 'senha-de-teste' } });
     expect(conflict.statusCode).toBe(409);
     expect(conflict.json().error.code).toBe('SESSION_CONFLICT');
 
@@ -162,20 +164,20 @@ describe.skipIf(!enabled)('API HTTP com MariaDB isolado', () => {
     expect((await app.inject({ method: 'PATCH', url: `/api/v1/formulas/${formulaId}/delivery-status`, headers: webHeaders, payload: { status: 'entregue' } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'PATCH', url: '/api/v1/formulas/delivery-status-batch', headers: webHeaders, payload: { ids: [formulaId], status: 'em_reentrega' } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: `/api/v1/formulas/${formulaId}/verification`, headers: webHeaders, payload: {} })).statusCode).toBe(403);
-    const manager = await app.inject({ method: 'POST', url: '/api/v1/auth/desktop/login', payload: { username: 'manager-qa', password: 'senha-de-teste' } });
+    const managerSession = await webLogin(app, 'manager-qa', 'senha-de-teste', false);
+    const manager = managerSession.response;
     expect(manager.statusCode).toBe(200);
-    const managerToken = manager.json().data.token;
-    expect((await app.inject({ method: 'GET', url: '/api/v1/auth/me', headers: { authorization: `Bearer ${managerToken}` } })).json().data.user.role).toBe('manager');
-    expect((await app.inject({ method: 'POST', url: `/api/v1/formulas/${formulaId}/verification`, headers: { authorization: `Bearer ${managerToken}` }, payload: {} })).statusCode).toBe(200);
-    const employee = await app.inject({ method: 'POST', url: '/api/v1/auth/desktop/login', payload: { username: 'employee-qa', password: 'senha' } });
-    const employeeToken = employee.json().data.token;
-    expect((await app.inject({ method: 'GET', url: '/api/v1/customers', headers: { authorization: `Bearer ${employeeToken}` } })).statusCode).toBe(200);
-    expect((await app.inject({ method: 'GET', url: '/api/v1/logs', headers: { authorization: `Bearer ${employeeToken}` } })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: { authorization: `Bearer ${employeeToken}` } })).statusCode).toBe(200);
-    const forced = await app.inject({ method: 'POST', url: '/api/v1/auth/desktop/login', payload: { username: 'manager-qa', password: 'senha-de-teste', force: true } });
+    expect((await app.inject({ method: 'GET', url: '/api/v1/auth/me', headers: managerSession.headers })).json().data.user.role).toBe('manager');
+    expect((await app.inject({ method: 'POST', url: `/api/v1/formulas/${formulaId}/verification`, headers: managerSession.headers, payload: {} })).statusCode).toBe(200);
+    const employeeSession = await webLogin(app, 'employee-qa', 'senha', false);
+    const employee = employeeSession.response;
+    expect((await app.inject({ method: 'GET', url: '/api/v1/customers', headers: employeeSession.headers })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/logs', headers: employeeSession.headers })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: employeeSession.headers })).statusCode).toBe(200);
+    const forcedSession = await webLogin(app, 'manager-qa', 'senha-de-teste', true);
+    const forced = forcedSession.response;
     expect(forced.statusCode).toBe(200);
-    const forcedToken = forced.json().data.token;
-    expect((await app.inject({ method: 'GET', url: '/api/v1/auth/me', headers: { authorization: `Bearer ${managerToken}` } })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/auth/me', headers: managerSession.headers })).statusCode).toBe(401);
     const saved = await app.inject({ method: 'POST', url: '/api/v1/saved-formulas', headers: webHeaders, payload: { name: 'Modelo QA', items: [{ insumo_id: insumoId, quantity: 1, unit: 'mg' }], budget_items: [{ quantity: 30, unit: 'caps', value: 20 }] } });
     expect(saved.statusCode).toBe(200);
     expect((await app.inject({ method: 'GET', url: '/api/v1/saved-formulas', headers: webHeaders })).statusCode).toBe(200);
@@ -187,60 +189,19 @@ describe.skipIf(!enabled)('API HTTP com MariaDB isolado', () => {
     expect((await app.inject({ method: 'DELETE', url: `/api/v1/insumos/${insumoId}`, headers: webHeaders, payload: { username: 'admin-qa', password: 'senha-de-teste' } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'DELETE', url: `/api/v1/customers/${customerId}`, headers: webHeaders, payload: { username: 'admin-qa', password: 'senha-de-teste' } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'DELETE', url: `/api/v1/users/${userId}`, headers: webHeaders, payload: { username: 'admin-qa', password: 'senha-de-teste' } })).statusCode).toBe(200);
-    expect((await app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: { authorization: `Bearer ${forcedToken}` } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: forcedSession.headers })).statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: webHeaders })).statusCode).toBe(200);
   });
 
-  it('prova Electron remoto e browser com contas distintas na mesma base', async () => {
-    const portServer = net.createServer();
-    await new Promise<void>((resolve, reject) => portServer.once('error', reject).listen(0, '127.0.0.1', resolve));
-    const address = portServer.address();
-    if (!address || typeof address === 'string') throw new Error('Porta QA indisponível.');
-    const port = address.port;
-    await new Promise<void>((resolve, reject) => portServer.close(error => error ? reject(error) : resolve()));
-    const pairedApp = await buildApp({
-      config: loadConfig({ NODE_ENV: 'test', MAGISFORM_SERVER_HOST: '127.0.0.1', MAGISFORM_SERVER_PORT: String(port), MAGISFORM_SERVER_DB_HOST: base.host, MAGISFORM_SERVER_DB_PORT: String(base.port), MAGISFORM_SERVER_DB_NAME: database, MAGISFORM_SERVER_DB_USER: base.user, MAGISFORM_SERVER_DB_PASSWORD: base.password }),
-      pool,
-      closePool: false,
-    });
-    const origin = await pairedApp.listen({ host: '127.0.0.1', port });
-    const config = { connectionMode: 'remote' as const, serverUrl: origin, host: '', port: 3306, user: '', password: '', database: '' };
-    const webContents = { id: 8765, send: () => {} };
-    const fakeWindow = { webContents } as any;
-    try {
-      const electronLogin = await loginRemote(webContents.id, config, 'electron-remote-qa', 'senha-de-teste', false, false);
-      expect(electronLogin.success).toBe(true);
-      expect(electronLogin.sessionToken).toBe('remote-session');
-      expect(electronLogin.sessionToken).not.toMatch(/^[A-Za-z0-9_-]{32,128}$/);
-      const duplicateLogin = await loginRemote(webContents.id + 1, config, 'electron-remote-qa', 'senha-de-teste', false, false);
-      expect(duplicateLogin).toMatchObject({ success: false, conflict: true });
-
-      const csrfResponse = await fetch(`${origin}/api/v1/auth/csrf`);
-      const csrf = (await csrfResponse.json() as any).data.csrfToken;
-      const csrfCookie = csrfResponse.headers.get('set-cookie')!.split(';')[0];
-      const webLoginResponse = await fetch(`${origin}/api/v1/auth/login`, { method: 'POST', headers: { Origin: origin, Cookie: csrfCookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'browser-qa', password: 'senha-de-teste' }) });
-      expect(webLoginResponse.status).toBe(200);
-      const webCookies = webLoginResponse.headers.get('set-cookie')!.split(/, (?=[^;]+=)/).map(value => value.split(';')[0]);
-      const webCookie = `${csrfCookie}; ${webCookies.find(value => value.startsWith('magisform_dev_session='))}`;
-      const webHeaders = { Origin: origin, Cookie: webCookie, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' };
-
-      const electronCreated = await invokeRemote(fakeWindow, config, 'customers:add', [{ name: 'Paciente Electron QA', phone: '5511999990011' }], false) as any;
-      expect(electronCreated.success).toBe(true);
-      const webReadsElectron = await fetch(`${origin}/api/v1/customers`, { headers: webHeaders });
-      const webRows = (await webReadsElectron.json() as any).data;
-      expect(webRows.some((row: any) => row.name === 'Paciente Electron QA')).toBe(true);
-
-      const webCreated = await fetch(`${origin}/api/v1/customers`, { method: 'POST', headers: webHeaders, body: JSON.stringify({ name: 'Paciente Browser QA', phone: '5511999990012' }) });
-      expect(webCreated.status).toBe(200);
-      const electronReadsWeb = await invokeRemote(fakeWindow, config, 'customers:list', ['passive'], false) as any[];
-      expect(electronReadsWeb.some(row => row.name === 'Paciente Browser QA')).toBe(true);
-
-      await fetch(`${origin}/api/v1/auth/logout`, { method: 'POST', headers: webHeaders, body: '{}' });
-      await invokeRemote(fakeWindow, config, 'auth:logout', [], false);
-      const [remainingSessions] = await pool.execute<mysql.RowDataPacket[]>(`SELECT COUNT(*) AS count FROM sessions WHERE user_id IN (SELECT id FROM users WHERE username IN ('electron-remote-qa','browser-qa'))`);
-      expect(Number(remainingSessions[0].count)).toBe(0);
-    } finally {
-      await pairedApp.close();
-    }
+  it('mantém duas sessões web de contas distintas na mesma instalação', async () => {
+    const first = await webLogin(app, 'admin-qa', 'senha-de-teste', true);
+    const second = await webLogin(app, 'browser-qa', 'senha-de-teste');
+    expect(first.response.statusCode).toBe(200);
+    expect(second.response.statusCode).toBe(200);
+    const created = await app.inject({ method: 'POST', url: '/api/v1/customers', headers: first.headers, payload: { name: 'Paciente entre sessões QA', phone: '5511999990011' } });
+    expect(created.statusCode).toBe(200);
+    const rows = (await app.inject({ url: '/api/v1/customers', headers: second.headers })).json().data;
+    expect(rows.some((row: any) => row.id === created.json().data.id)).toBe(true);
+    for (const session of [first, second]) expect((await app.inject({ method: 'POST', url: '/api/v1/auth/logout', headers: session.headers, payload: {} })).statusCode).toBe(200);
   });
 });

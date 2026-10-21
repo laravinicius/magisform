@@ -90,6 +90,14 @@ export function stripDiacritics(s: string): string {
   return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// Padroniza a exibição da unidade sem alterar o valor persistido.
+export function formatUnit(unit: string): string {
+  const normalizedUnit = unit.toLowerCase();
+  if (normalizedUnit === 'caps s.l.') return 'caps S.L.';
+  if (normalizedUnit === 'sachê') return 'sachês';
+  return unit;
+}
+
 // Formata quantidade: remove zeros à direita; usa . para milhar, , para decimal
 // ex.: 2 → "2", 2.5 → "2,5", 2.500 → "2,5", 1234.5 → "1.234,5", 1000000 → "1.000.000"
 export function formatQuantity(value: number | string): string {

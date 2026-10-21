@@ -1,3 +1,5 @@
+> Atualização: as referências desktop deste ADR são históricas. O produto atual é exclusivamente web; permanecem os contratos de bootstrap, upgrade explícito e preservação de checksums.
+
 # ADR-002 — Bootstrap explícito e upgrades versionados de banco
 
 ## Status

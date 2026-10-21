@@ -1,3 +1,5 @@
+> Registro histórico: a arquitetura desktop descrita neste documento foi superada pela aplicação exclusivamente web. Consulte `docs/architecture.md` para o fluxo vigente. Resultados de QA históricos não validam a versão atual.
+
 # Etapa 11 — Validação integrada e versão candidata
 
 **Estado:** gate parcial reprovado para versão candidata. QA integrado e ensaios sustentados foram executados em 8 de outubro de 2026. Nenhum deploy, publicação, DNS público, certificado ACME ou alteração de produção foi feito.

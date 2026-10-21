@@ -3,8 +3,7 @@ import { User } from '../types';
 
 interface AuthContextValue {
   user: User | null;
-  sessionToken: string | null;
-  setAuth: (user: User | null, token: string | null) => void;
+  setAuth: (user: User | null) => void;
   clearAuth: () => void;
 }
 
@@ -12,20 +11,17 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
 
-  const setAuth = useCallback((u: User | null, token: string | null) => {
+  const setAuth = useCallback((u: User | null) => {
     setUser(u);
-    setSessionToken(token);
   }, []);
 
   const clearAuth = useCallback(() => {
     setUser(null);
-    setSessionToken(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, sessionToken, setAuth, clearAuth }}>
+    <AuthContext.Provider value={{ user, setAuth, clearAuth }}>
       {children}
     </AuthContext.Provider>
   );

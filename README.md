@@ -1,207 +1,61 @@
 # MagisForm
 
-![Version](https://img.shields.io/badge/version-0.2.0-blue)
-![Node](https://img.shields.io/badge/Node-20%2B-green)
-![Electron](https://img.shields.io/badge/Electron-36-blue)
-![React](https://img.shields.io/badge/React-19-61dafb)
-![Vite](https://img.shields.io/badge/Vite-6-646cff)
-![Tailwind](https://img.shields.io/badge/Tailwind_CSS-v4-06b6d4)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue)
-![MariaDB](https://img.shields.io/badge/MariaDB-11-0064a5)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+Sistema exclusivamente web para o fluxo de manipulação farmacêutica, do orçamento à entrega. React 19, Vite, TypeScript, Tailwind CSS v4, API Fastify e MariaDB. O acesso é pelo navegador; não há aplicativo Electron, instalador Windows ou atualizador desktop.
 
-Aplicação desktop online-first para gerenciamento do fluxo de manipulação farmacêutica. Usa Electron, React 19, Vite, TypeScript, Tailwind CSS v4 e MariaDB. Não há cache local nem sincronização offline documentada.
+Cada cliente possui uma instalação Docker isolada, com aplicação, banco, volume, segredos e redes próprios. O painel central gerencia o provisionamento e as ações de iniciar, parar e reiniciar. O Nginx Proxy Manager publica os endereços HTTPS.
 
-O produto e o aplicativo usam a marca **MagisForm**.
+## Desenvolvimento
 
-## Visão geral
+Use Node.js 22 e instale as dependências com `npm ci`.
 
-![Prévia do sistema MagisForm com a lista de fórmulas em produção](website/assets/images/formulas-1600.webp)
+1. Use `.env.example` como referência e exporte as variáveis no terminal da API; o backend não carrega `.env` automaticamente. Configure `MAGISFORM_SERVER_DB_HOST`, `MAGISFORM_SERVER_DB_PORT`, `MAGISFORM_SERVER_DB_NAME`, `MAGISFORM_SERVER_DB_USER` e `MAGISFORM_SERVER_DB_PASSWORD` (ou `MAGISFORM_SERVER_DB_PASSWORD_FILE`), conforme `server/config.ts`.
+2. No ambiente da API, defina também `MAGISFORM_SERVER_ORIGIN=http://127.0.0.1:3002` para aceitar as requisições do frontend. Inicie a API com `npm run dev:server` em `127.0.0.1:3001`.
+3. Em outro terminal, execute `npm run dev` e abra `http://127.0.0.1:3002`. O Vite encaminha `/api` para a API.
 
-## Funcionalidades
-
-| Módulo | Descrição |
-|---|---|
-| Dashboard | Estatísticas de fórmulas, clientes e insumos e ações rápidas. |
-| Nova Fórmula | Cliente, atendente, orçamento, insumos, quantidades, unidades, entrega e pagamento. |
-| Pendentes | Fórmulas `pending`, aguardando confirmação e validação dos campos obrigatórios. |
-| Confirmadas | Fórmulas `confirmed`/`completed`, com andamento `em_producao`, `aguardando_retirada`, `aguardando_envio` ou `entregue`. |
-| Histórico | Fórmulas `cancelled`/`delivered`, filtros, visualização e repetição. |
-| Clientes | Cadastro, edição, busca e paginação; telefone único. |
-| Insumos | Cadastro e edição de matérias-primas; nome único. |
-| Minhas Fórmulas | Modelos reutilizáveis com insumos e itens de orçamento. |
-| Administração | Usuários `admin`/`employee`, administradores, troca de senha e exclusões protegidas. |
-| Logs de auditoria | Consulta de ações registradas em `action_logs`. |
-| Configurações | Conexão MariaDB salva em `userData/config.json` e teste de conexão. |
-| WhatsApp | Abertura de links `whatsapp://send`. |
-
-A entrega só pode avançar quando o pagamento estiver marcado como pago, conforme as regras do backend.
-
-## Stack
-
-| Camada | Tecnologia |
-|---|---|
-| Runtime | Electron 36.x |
-| Frontend | React 19.x |
-| Build | Vite 6.x + `vite-plugin-electron` |
-| Estilos | Tailwind CSS 4.x via `@tailwindcss/vite` |
-| Linguagem | TypeScript 5.8.x |
-| Banco | MariaDB 11 no Docker; MariaDB/MySQL configurável |
-| Driver | `mysql2` 3.18.x |
-| Animações | `motion` 12.x |
-| Ícones | `lucide-react` 0.546.x |
-| Empacotamento | `electron-builder` 25.x |
-| Verificação | `tsc --noEmit` |
-
-## Arquitetura
-
-O renderer não acessa o banco diretamente:
-
-```text
-React
-  ↓ src/services/lanDatabase.ts
-preload.ts / contextBridge
-  ↓ IPC
-electron/main.ts / ipcMain.handle
-  ↓
-core/db.ts / mysql2
-  ↓
-MariaDB
-```
-
-- `main.ts`: janela, handlers IPC, configuração, saída e notificações.
-- `preload.ts`: API isolada `window.electronAPI`.
-- `db.ts`: queries, autenticação, autorização, sessões e auditoria.
-- `lanDatabase.ts`: fachada tipada do renderer.
-- `useData.ts`: evento `data:changed` e polling a cada 10 segundos.
-- A fachada também possui caminho compatível com execução web via `fetch` para endpoints `/api`, quando disponível.
-- O alias `@/*` resolve para a raiz do repositório, não para `src/`.
-
-## Banco de dados
-
-`database.sql` é a fonte operacional única. O Docker o monta na inicialização. `migrations/` é somente histórico; não há executor de migrations no runtime ou nos scripts.
-
-Tabelas principais:
-
-```text
-users, customers, insumos, formulas
-formula_items, formula_budget_items
-saved_formulas, saved_formula_items, saved_formula_budget_items
-budget_number_registry, sessions, action_logs
-```
-
-Senhas são armazenadas atualmente como SHA-256 hexadecimal. O seed de `database.sql` cria:
-
-- usuário: `administrador`
-- senha: definida pelo hash existente no próprio `database.sql`
-- papel: `admin`
-
-O modo especial de configuração usa `admin` / `admin123`; essas credenciais não são o usuário seed e servem apenas para acessar Configurações.
-
-## Autenticação e sessões
-
-- Papéis: `admin` e `employee`.
-- Token mantido em memória no renderer, sem persistência local.
-- Heartbeat do cliente a cada 2 segundos.
-- TTL de sessão: 120 segundos sem heartbeat.
-- Limpeza de sessões órfãs a cada 60 segundos no processo principal.
-- Uma sessão ativa por usuário; login forçado substitui a anterior.
-- Logout após 5 minutos sem mouse, teclado, clique ou toque.
-- Operações administrativas também são verificadas no backend.
-
-## Primeira execução
-
-1. Inicie MariaDB ou use o Docker Compose.
-2. Execute `npm install`.
-3. Execute `npm run dev`.
-4. Para configurar a conexão, use `admin` / `admin123`.
-5. Preencha e teste host, porta, usuário, senha e banco em Configurações.
-6. Reinicie e entre com `administrador` ou outro usuário existente; novos usuários podem ser criados em Administração.
-
-## Banco local com Docker
-
-O Compose usa MariaDB 11, expõe `3306`, executa `database.sql` na primeira inicialização e persiste dados em volume nomeado.
-
-```bash
-docker compose up -d
-docker compose ps
-docker compose logs -f mariadb
-```
-
-Credenciais de desenvolvimento: banco `magisform`, usuário `magisform_app`, senha `magisform_dev`, root `magisform_root_dev`.
-
-Para recriar o banco, removendo os dados persistidos:
-
-```bash
-docker compose down -v
-docker compose up -d
-```
+Bootstrap e upgrades de banco são operações explícitas. Consulte [banco](docs/database.md) antes de executá-los; iniciar o servidor nunca aplica DDL.
 
 ## Comandos
 
-| Comando | Descrição |
+| Comando | Resultado |
 |---|---|
-| `npm install` | Instala dependências. |
-| `npm run dev` | Inicia Vite em `0.0.0.0:3000` com o plugin Electron em desenvolvimento. |
-| `npm run build` | Executa patch do ícone, build Vite e `electron-builder --win`. |
-| `npm run preview` | Preview do build Vite, sem Electron. |
-| `npm run lint` | `tsc --noEmit`; não há suíte de testes configurada. |
-| `npm run clean` | Remove `dist/`, `dist-electron/`, `release/` e `../magisform-release/`. |
+| `npm run dev` / `npm run dev:web` | Frontend web na porta 3002 |
+| `npm run dev:server` | API em desenvolvimento |
+| `npm run build` | Aplicação web, painel e backend |
+| `npm run build:web` | `dist-web` e auditoria de bundle |
+| `npm run build:server` | Backend em `dist-server` |
+| `npm run build:manager` | Painel em `dist-manager` e backend |
+| `npm run start:server` | API compilada, servindo `dist-web` na mesma origem |
+| `npm run manager:setup` / `npm run manager:api` | Configuração explícita e execução do painel |
+| `npm run tenant:provision -- <id> <host> --image <imagem-aprovada>` | Preparação de instalação isolada; `--apply` executa o provisionamento |
+| `npm run lint` / `npm run lint:server` | Verificação TypeScript |
+| `npm test` | Testes unitários; integrações exigem MariaDB configurado |
+| `npm run test:integration` | MariaDB Docker descartável e testes de integração |
+| `npm run test:docker` | QA com dois clientes descartáveis e ações reais do painel; compila a imagem QA local e exige Docker disponível |
+| `npm run clean` | Remove somente `dist-web`, `dist-server` e `dist-manager` |
 
-## Build para Windows
+## Arquitetura e implantação
 
-```bash
-npm run build
-```
+| Pasta | Responsabilidade |
+|---|---|
+| `src/`, `public/`, `config/` | Aplicação React, recursos públicos e identidade visual |
+| `server/`, `core/`, `shared/` | API HTTP, persistência e contratos compartilhados |
+| `management/`, `manager/` | Interface e API/executor do painel de gerenciamento |
+| `database/`, `database.sql` | Upgrades versionados e schema de instalação limpa |
+| `deploy/`, `scripts/`, `tests/` | Implantação, ferramentas operacionais e validações |
+| `docs/`, `website/` | Documentação e site institucional independente |
 
-Os targets configurados são `dir` e `nsis`. O destino é:
+`React → lanDatabase.ts → httpAdapter.ts → /api/v1 → core/db.ts → MariaDB`.
 
-```text
-../magisform-release/<versão>/
-```
+O navegador usa cookie HttpOnly e CSRF. Não recebe credenciais MariaDB nem token de sessão em JSON. Cada cliente acessa seu próprio domínio; banco e volumes não são compartilhados.
 
-`dir` gera uma versão descompactada; `nsis` gera o instalador quando os binários necessários estiverem disponíveis.
+- [Arquitetura](docs/architecture.md) e [módulos](docs/modules.md).
+- [Autenticação e permissões](docs/authentication.md).
+- [Instalações por cliente](docs/deployment/tenant-installations.md).
+- [Painel de gerenciamento](docs/deployment/management-console.md) e [instalação do gerenciador](docs/deployment/manager-installation-runbook.md).
+- [Operação e recuperação](docs/deployment/operations.md).
 
-## Estrutura
+`Dockerfile` gera a imagem web/API; `Dockerfile.manager` gera a imagem do painel/executor. Os builds não publicam imagens. Segredos, catálogos operacionais e volumes não devem entrar no Git.
 
-```text
-magisform/
-├── electron/
-│   ├── main.ts, preload.ts
-├── core/
-│   ├── db.ts, dbError.ts, deliveryTime.ts
-├── src/
-│   ├── components/          # telas e módulos de negócio
-│   │   ├── AdminUserManager.tsx, AuditLogs.tsx
-│   │   ├── Dashboard.tsx, FormulaList.tsx, RecipeForm.tsx
-│   │   └── SettingsManager.tsx e demais componentes
-│   ├── context/             # AuthContext e FormDraftContext
-│   ├── hooks/useData.ts
-│   ├── services/lanDatabase.ts
-│   ├── types.ts, App.tsx, index.css
-│   └── utils/                # formatação, navegação e performance
-├── config/branding.ts
-├── database.sql
-├── docker-compose.yml
-├── public/, scripts/, docs/
-├── package.json
-└── README.md
-```
+O site institucional independente está em `website/`. A identidade visual usa `config/branding.ts`, fontes locais e os vetores aprovados em `public/brand/`.
 
-## Convenções
-
-- Interface e comentários novos em português brasileiro.
-- Novo acesso a dados segue `main.ts` → `preload.ts` → `lanDatabase.ts` → banco.
-- Mudanças de schema atualizam `database.sql`; não criar migrations sem decisão arquitetural.
-- Mutações preservam auditoria e `data:changed`.
-- Cores de marca: vermelho `#C5243E`, azul `#243465` e azul claro `#4A90D9`; não usar `red-500`/`blue-500` como substitutos.
-- Capturas de tela podem ser colocadas em `docs/screenshots/` (recomendado: 1280x800, PNG/WebP).
-
-## Licença e autor
-
-Este projeto está sob a [licença MIT](LICENSE).
-
-**Vinicius Lara** — [GitHub](https://github.com/ViniciusLara) · [LinkedIn](https://linkedin.com/in/viniciuslara)
-
-Dependências principais: [Electron](https://www.electronjs.org/), [Vite](https://vitejs.dev/), [React](https://react.dev/), [Tailwind CSS](https://tailwindcss.com/), [MariaDB](https://mariadb.org/), [lucide-react](https://lucide.dev/) e [Motion](https://motion.dev/). A lista completa está em [package.json](package.json).
-
+As únicas saídas de compilação atuais são `dist-web/`, `dist-server/` e `dist-manager/`, todas ignoradas pelo Git. Evidências de QA em `output/`, caches e configurações operacionais também ficam fora do versionamento. Os registros de etapas em `docs/plans/progress/` e o ADR-002 preservam o histórico anterior à migração web; consulte os mapas de arquitetura e módulos para o estado atual.

@@ -1,4 +1,4 @@
-# Imagem de execução web/API para QA e release; não contém Electron nem segredos.
+# Imagem de execução web/API para QA e release; não contém segredos.
 FROM node:22.14.0-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./

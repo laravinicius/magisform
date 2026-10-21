@@ -2,7 +2,7 @@
 
 ## Topologia e build
 
-`Dockerfile` compila frontend e API em estágios separados e produz uma única imagem OCI de execução para todas as farmácias. O runtime usa Node 22.14.0 Alpine, usuário `node`, lockfile, healthcheck `/health/live` e contém apenas builds web/API, schema/upgrades e dependências de runtime; Electron, ferramentas de build, `.env`, banco, certificados e segredos ficam fora da imagem. Para releases, publique fora do escopo desta etapa e registre o digest SHA-256; provisionamento aceita somente digest imutável.
+`Dockerfile` compila frontend e API em estágios separados e produz uma única imagem OCI de execução para todas as farmácias. O runtime usa Node 22.14.0 Alpine, usuário `node`, lockfile, healthcheck `/health/live` e contém apenas builds web/API, schema/upgrades e dependências de runtime; Ferramentas de build, `.env`, banco, certificados e segredos ficam fora da imagem. Para releases, publique fora do escopo desta etapa e registre o digest SHA-256; provisionamento aceita somente digest imutável.
 
 ```sh
 docker build --pull=false -t magisform:qa -f Dockerfile .

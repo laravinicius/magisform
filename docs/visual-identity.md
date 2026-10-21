@@ -4,7 +4,7 @@ O aplicativo segue a identidade aprovada em `website/brand/GUIDE.md`, adaptada p
 
 ## Cores e fontes
 
-`config/branding.ts` é a fonte de cores. `applyBrandTheme()`, chamado antes da montagem do React, disponibiliza variáveis `--mf-*` ao CSS; o processo principal continua importando as cores da mesma configuração para a janela nativa.
+`config/branding.ts` é a fonte de cores. `applyBrandTheme()`, chamado antes da montagem do React, disponibiliza variáveis `--mf-*` ao CSS. A configuração pública da instalação, recebida pela API, aplica a marca e as cores no navegador por `applyPublicBrand()`.
 
 | Papel | Cor |
 |---|---|
@@ -24,8 +24,6 @@ Atkinson Hyperlegible Next é a fonte do corpo, controles, navegação e tabelas
 
 Os utilitários semânticos Tailwind e os estilos de componentes estão em `src/index.css`: `ui-panel`, `ui-field`, `ui-button`, `ui-button-primary`, `ui-button-secondary`, `ui-icon-button`, `ui-dialog`, `ui-page-title` e `ui-table`.
 
-Os controles da barra de título têm estilos próprios de 30 px para respeitar a área nativa da janela. Não devem receber os estilos dos botões de formulário.
-
 `DialogSurface` oferece nome acessível pelo título, navegação de Tab restrita ao diálogo e restauração de foco. Os eventos de confirmação e fechamento continuam nos consumidores. A preferência de movimento reduzido é respeitada pelo CSS e por `MotionConfig`.
 
 ## Layout e manutenção
@@ -36,4 +34,4 @@ Os controles da barra de título têm estilos próprios de 30 px para respeitar 
 - Use os vetores aprovados de `public/brand/`, com suas proporções originais. Não aplique sombras ou gradientes ao logo.
 - Não sobrescreva classes Tailwind globais nem adicione uma paleta independente por componente.
 
-Esta camada não altera schema, serviços, IPC, permissões ou persistência. A pasta `website` é a referência visual e permanece independente do desktop.
+Esta camada não altera schema, serviços HTTP, permissões ou persistência. A pasta `website` é a referência visual e permanece independente da aplicação web.

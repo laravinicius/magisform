@@ -7,7 +7,6 @@ import { useData } from '../hooks/useData';
 import { useFormDraft } from '../context/FormDraftContext';
 import { LoadingState, ErrorState } from './Feedback';
 import { AdminAuthModal } from './AdminAuthModal';
-import { useAuth } from '../context/AuthContext';
 import { COLORS } from '../../config/branding';
 import { canManageUsers, USER_ROLE_LABELS, UserRole } from '../types';
 
@@ -25,7 +24,6 @@ export function AdminPanel({ user }: { user: User }) {
 
 export function UserManager({ user }: { user: User }) {
   const { data: users, loading, error, reload } = useData('users', activity => db.users.list(activity));
-  const { sessionToken } = useAuth();
   const emptyForm = { name: '', username: '', password: '', role: 'employee' as UserRole };
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -87,7 +85,7 @@ export function UserManager({ user }: { user: User }) {
           username: form.username.trim(),
           password: form.password.trim() || undefined,
           role: form.role,
-        }, sessionToken ?? undefined);
+        });
         if (res && res.success === false) {
           setFormError(res.error ?? 'Erro ao salvar. Tente novamente.');
           return;
@@ -98,7 +96,7 @@ export function UserManager({ user }: { user: User }) {
           username: form.username.trim(),
           password: form.password.trim(),
           role: form.role,
-        }, sessionToken ?? undefined);
+        });
         if (res && res.success === false) {
           setFormError(res.error ?? 'Erro ao salvar. Tente novamente.');
           return;
@@ -126,7 +124,7 @@ export function UserManager({ user }: { user: User }) {
   const handleDeleteConfirm = async (adminCreds?: { username: string; password: string }, token?: string) => {
     if (pendingDeleteId === null) return;
     try {
-      const res: any = await db.users.remove(pendingDeleteId, adminCreds, token ?? sessionToken ?? undefined);
+      const res: any = await db.users.remove(pendingDeleteId, adminCreds);
       if (res?.success === false) { setFormError(res.error ?? 'Erro ao excluir.'); return; }
       reload();
       setPendingDeleteId(null);

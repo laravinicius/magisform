@@ -5,59 +5,28 @@
   "description": "Aplicativo de gerenciamento de fórmulas farmacêuticas.",
   "author": "Vinicius Lara",
   "type": "module",
-  "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
-    "dev:web": "vite --config vite.web.config.ts",
+    "dev": "vite",
+    "dev:web": "vite",
     "dev:server": "tsx watch server/index.ts",
     "build:server": "tsc -p tsconfig.server.json",
-    "build:manager": "vite build --config vite.manager.config.ts && tsc -p tsconfig.server.json",
+    "build:manager": "vite build --config vite.manager.config.ts && node scripts/check-web-bundle.mjs dist-manager && tsc -p tsconfig.server.json",
     "manager:setup": "npm run build:server && node scripts/manager-setup.mjs",
     "manager:api": "node dist-server/manager/index.js",
     "start:server": "node dist-server/server/index.js",
     "lint:server": "tsc --noEmit -p tsconfig.server.json",
-    "build": "node scripts/patch-icon.js && vite build --configLoader native && electron-builder --win",
-    "build:web": "vite build --config vite.web.config.ts && node scripts/check-web-bundle.mjs",
-    "build:release": "node scripts/patch-icon.js && vite build --configLoader native && electron-builder --win --publish always",
+    "build": "npm run build:web && npm run build:manager",
+    "build:web": "vite build && node scripts/check-web-bundle.mjs",
     "preview": "vite preview",
-    "clean": "node -e \"const fs=require('fs'); for (const dir of ['dist','dist-electron','release','../magisform-release']) fs.rmSync(dir, { recursive: true, force: true });\"",
+    "clean": "node -e \"const fs=require('fs'); for (const dir of ['dist-web','dist-server','dist-manager']) fs.rmSync(dir, { recursive: true, force: true });\"",
     "lint": "tsc --noEmit",
     "db:bootstrap": "node scripts/database-schema.mjs bootstrap",
     "db:preflight": "node scripts/database-schema.mjs preflight",
     "db:upgrade": "node scripts/database-schema.mjs upgrade",
     "tenant:provision": "node scripts/provision-tenant.mjs",
     "test": "node scripts/check-shared-boundary.mjs && vitest run --config vitest.config.ts",
-    "test:integration": "node scripts/test-integration.mjs"
-  },
-  "build": {
-    "appId": "com.magisform.app",
-    "productName": "MagisForm",
-    "electronDist": "node_modules/electron/dist",
-    "directories": {
-      "output": "../magisform-release/${version}"
-    },
-    "files": [
-      "dist",
-      "dist-electron"
-    ],
-    "asarUnpack": [
-      "node_modules/@node-rs/**/*.node"
-    ],
-    "forceCodeSigning": false,
-    "publish": {
-      "provider": "github",
-      "owner": "laravinicius",
-      "repo": "magisform",
-      "releaseType": "release"
-    },
-    "win": {
-      "icon": "public/icon.ico",
-      "artifactName": "MagisForm-Setup-${version}.${ext}",
-      "target": [
-        "dir",
-        "nsis"
-      ]
-    }
+    "test:integration": "node scripts/test-integration.mjs",
+    "test:docker": "npm run build && docker build -t magisform:web-removal-qa . && node scripts/test-web-docker.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
@@ -65,7 +34,6 @@
     "@fastify/swagger": "^9.9.1",
     "@fastify/swagger-ui": "^6.1.1",
     "@node-rs/argon2": "^2.2.2",
-    "electron-updater": "^6.8.9",
     "fastify": "^5.12.5",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
@@ -79,16 +47,12 @@
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
-    "electron": "^36.9.5",
-    "electron-builder": "^25.1.8",
     "esbuild": "^0.25.12",
     "sharp": "^0.35.3",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.23.15",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
-    "vite-plugin-electron": "^0.29.0",
-    "vite-plugin-electron-renderer": "^0.14.6",
     "vitest": "^3.2.7"
   },
   "allowScripts": {

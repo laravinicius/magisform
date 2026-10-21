@@ -23,7 +23,12 @@ export interface FormulaItemDto { insumo_id: number; insumo_name: string; quanti
 export interface BudgetItemDto { quantity: number; unit: string; value: number; is_selected?: boolean | number }
 export type FormulaStatus = 'pending' | 'confirmed' | 'cancelled' | 'delivered';
 
+export type PaymentStatus = 'pago' | 'parcial' | 'pagar_na_retirada';
+export type SummaryPaymentStatus = PaymentStatus | 'nao_pago';
+export interface FormulaPaymentUpdate { payment_status: PaymentStatus; partial_payment_amount: number | null }
+
 export interface FormulaDto {
+  created_by_name: string | null;
   id: number;
   customer_id: number;
   customer_name: string;
@@ -68,6 +73,7 @@ export interface FormulaSummaryDto {
 
 export interface SavedFormulaItemDto { insumo_id: number; insumo_name?: string; quantity: number; unit?: string }
 export interface SavedFormulaDto {
+  created_by_name: string | null;
   id: number;
   name: string;
   budget_number?: string;
@@ -150,17 +156,15 @@ export interface OperationResultDto {
   success: boolean;
   id?: number;
   user?: UserDto;
-  setupMode?: boolean;
   error?: string;
   code?: ErrorCode;
   conflict?: boolean;
 }
 export interface SessionStateDto {
-  /** Campo legado retornado pelo heartbeat desktop. */
+  /** Validade da sessão consultada pelo heartbeat. */
   valid?: boolean;
   authenticated: boolean;
   user: UserDto | null;
-  setupMode?: boolean;
   /** Metadados para o adapter; tokens de browser nunca fazem parte do estado do renderer. */
   expiresAt?: string | null;
 }
@@ -169,7 +173,7 @@ export interface BusinessOperations {
   users: { list(): Promise<UserDto[]>; add(input: UserInputDto): Promise<OperationResultDto>; update(id: number, input: Partial<UserInputDto>): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
   customers: { list(): Promise<CustomerDto[]>; add(input: CustomerInputDto): Promise<OperationResultDto>; update(id: number, input: Partial<CustomerInputDto>): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
   insumos: { list(): Promise<InsumoDto[]>; add(name: string): Promise<OperationResultDto>; update(id: number, name: string): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
-  formulas: { list(query: FormulaListQueryDto): Promise<FormulaListPageDto>; get(id: number): Promise<FormulaDto | null>; summary(month: number, year: number): Promise<FormulaSummaryDto>; add(input: FormulaInputDto): Promise<OperationResultDto>; update(id: number, input: FormulaInputDto): Promise<OperationResultDto>; updateStatus(id: number, status: string): Promise<OperationResultDto>; updateDeliveryStatus(id: number, status: string): Promise<OperationResultDto>; verify(id: number): Promise<OperationResultDto>; updateDeliveriesStatus(ids: number[], status: string): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
+  formulas: { list(query: FormulaListQueryDto): Promise<FormulaListPageDto>; get(id: number): Promise<FormulaDto | null>; summary(month: number, year: number, paymentStatus?: SummaryPaymentStatus, activity?: 'user' | 'passive'): Promise<FormulaSummaryDto>; add(input: FormulaInputDto): Promise<OperationResultDto>; update(id: number, input: FormulaInputDto): Promise<OperationResultDto>; updateStatus(id: number, status: string): Promise<OperationResultDto>; updatePayment(id: number, payment: FormulaPaymentUpdate): Promise<OperationResultDto>; updateDeliveryStatus(id: number, status: string): Promise<OperationResultDto>; verify(id: number): Promise<OperationResultDto>; updateDeliveriesStatus(ids: number[], status: string): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
   savedFormulas: { list(): Promise<SavedFormulaDto[]>; add(input: SavedFormulaInputDto): Promise<OperationResultDto>; update(id: number, input: SavedFormulaInputDto): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
   logs: { list(filters?: LogFiltersDto): Promise<LogPageDto> };
 }

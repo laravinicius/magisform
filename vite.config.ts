@@ -3,33 +3,18 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { defineConfig } from 'vite';
-import electron from 'vite-plugin-electron/simple';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   base: './',
-  define: { 'import.meta.env.VITE_APP_TRANSPORT': JSON.stringify('desktop') },
-  plugins: [
-    react(),
-    tailwindcss(),
-    electron({
-      main: {
-        entry: 'electron/main.ts',
-        vite: { build: { rollupOptions: { external: ['@node-rs/argon2'] } } },
-      },
-      preload: {
-        input: 'electron/preload.ts',
-      },
-      renderer: {},
-    }),
-  ],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, '.'),
-    },
-  },
+  plugins: [react(), tailwindcss()],
+  resolve: { alias: { '@': path.resolve(root, '.') } },
+  optimizeDeps: { entries: ['index.html'] },
+  build: { outDir: 'dist-web', emptyOutDir: true, sourcemap: false },
   server: {
-    hmr: true,
+    port: 3002,
+    host: '127.0.0.1',
+    proxy: { '/api': { target: 'http://127.0.0.1:3001', changeOrigin: false } },
   },
 });

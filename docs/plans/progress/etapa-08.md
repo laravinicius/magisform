@@ -1,3 +1,5 @@
+> Registro histórico: a arquitetura desktop descrita neste documento foi superada pela aplicação exclusivamente web. Consulte `docs/architecture.md` para o fluxo vigente. Resultados de QA históricos não validam a versão atual.
+
 # Etapa 08 — Electron remoto com preservação do modo local
 
 **Estado:** em andamento; implementação e QA automatizado passaram, mas faltam smoke tests do executável Windows iniciado nos dois modos.

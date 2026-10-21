@@ -1,4 +1,5 @@
 import https from 'node:https';
+import { loginSession, sessionHeaders } from './web-session.mjs';
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -16,13 +17,13 @@ const agent = new https.Agent({ keepAlive: true, maxSockets: 100, rejectUnauthor
 } });
 const stats = { users, durationMinutes, requests: 0, failures5xx: 0, nonSuccess: 0, bytes: 0, latencies: {}, responseBytes: {}, rowsPerResponse: {}, startAt: new Date().toISOString(), endAt: null, samples: [] };
 
-function request(host, method, pathname, token, body) {
+function request(host, method, pathname, session, body) {
   return new Promise((resolve) => {
     const start = performance.now();
-    const req = https.request({ hostname: host, port, method, path: pathname, agent, headers: { host, ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) } }, (res) => {
+    const req = https.request({ hostname: host, port, method, path: pathname, agent, headers: { host, ...sessionHeaders(host, port, session), ...(body ? { 'content-type': 'application/json' } : {}) } }, (res) => {
       let bytes = 0; let body = '';
       res.on('data', (chunk) => { bytes += chunk.length; body += chunk.toString('utf8'); });
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, ms: performance.now() - start, bytes, payload: (() => { try { return JSON.parse(body); } catch { return null; } })() }));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, ms: performance.now() - start, bytes, headers: res.headers, payload: (() => { try { return JSON.parse(body); } catch { return null; } })() }));
     });
     req.setTimeout(30_000, () => req.destroy(new Error('request timeout')));
     req.on('error', () => resolve({ status: 0, ms: performance.now() - start, bytes: 0, payload: null }));
@@ -52,15 +53,9 @@ for (const host of hosts) {
   const tenant = host.endsWith('-a.invalid') ? 'a' : 'b';
   for (let index = 1; index <= users; index++) {
     const username = `s11load${tenant}${String(index).padStart(2, '0')}`;
-    const loginResult = await new Promise((resolve) => {
-      const req = https.request({ hostname: host, port, method: 'POST', path: '/api/v1/auth/desktop/login', agent, headers: { host, 'content-type': 'application/json' } }, (res) => { let data = ''; res.setEncoding('utf8'); res.on('data', (chunk) => { data += chunk; }); res.on('end', () => resolve({ status: res.statusCode, body: data })); });
-      req.on('error', (error) => resolve({ status: 0, body: JSON.stringify({ error: error.message }) }));
-      req.end(JSON.stringify({ username, password: password(tenant), force: true }));
-    });
-    const loginJson = JSON.parse(loginResult.body);
-    const token = loginJson.data?.token;
-    if (!token) throw new Error(`Login QA ${tenant}/${index} falhou com HTTP ${loginResult.status}: ${loginJson.error ?? loginJson.message ?? 'resposta sem token'}.`);
-    sessions.push({ host, tenant, index, token });
+    const loginResult = await loginSession((host, path, options = {}) => request(host, options.method ?? 'GET', path, options.session, options.body), host, username, password(tenant), true);
+    if (loginResult.status !== 200) throw new Error(`Login QA ${tenant}/${index} falhou com HTTP ${loginResult.status}.`);
+    sessions.push({ host, tenant, index, session: loginResult.session });
   }
 }
 
@@ -71,7 +66,7 @@ async function worker(session) {
   while (Date.now() < stopAt) {
     const formulaPath = `/api/v1/formulas?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     for (const pathname of [formulaPath, '/api/v1/health/ready']) {
-      const result = await request(session.host, 'GET', pathname, session.token);
+      const result = await request(session.host, 'GET', pathname, session.session);
       stats.requests += 1;
       stats.bytes += result.bytes;
       const metricKey = `${session.tenant}:${pathname}`;

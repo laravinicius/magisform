@@ -160,8 +160,8 @@ if (apply) {
   const preflight = checked(['compose', 'run', '--rm', '--no-deps', 'app', 'node', 'scripts/database-schema.mjs', 'preflight']);
   if (/banco magisform vazio; elegível para bootstrap/.test(preflight)) {
     checked(['compose', 'run', '--rm', '--no-deps', 'app', 'node', 'scripts/database-schema.mjs', 'bootstrap']);
-  } else if (!/schema v2 válido \(bootstrap\)/.test(preflight)) {
-    throw new Error('Preflight não reconheceu schema bootstrap v2; nenhuma alteração de schema foi aplicada.');
+  } else if (!/schema v3 válido \(bootstrap\)/.test(preflight)) {
+    throw new Error('Preflight não reconheceu schema bootstrap v3; nenhuma alteração de schema foi aplicada.');
   }
   const prompt = args.includes('--admin-name') && args.includes('--admin-user') ? null : readline.createInterface({ input: stdin, output: stdout });
   try {

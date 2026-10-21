@@ -1,6 +1,6 @@
 # MagisForm — website comercial
 
-Landing page estática em português para apresentar o software desktop a farmácias de manipulação. HTML, CSS e JavaScript sem etapa de build. Este projeto funciona independentemente da aplicação desktop.
+Landing page estática em português para apresentar o sistema web a farmácias de manipulação. HTML, CSS e JavaScript sem etapa de build. Este projeto funciona independentemente da aplicação web.
 
 ## Abrir localmente
 
@@ -38,7 +38,7 @@ Os dados são exclusivamente fictícios: clientes de exemplo, telefones sem uso,
 
 No celular, a imagem ampliada pode ser deslizada horizontalmente para facilitar a leitura. A legenda identifica a origem: “Telas do MagisForm com dados fictícios para demonstração.”
 
-O site apresenta o produto como aplicativo desktop para Windows que depende de conexão ao banco de dados da operação. A contratação é sob consulta. Não há preços, depoimentos ou serviços de implantação/suporte prometidos.
+O site apresenta o produto como sistema web acessado pelo navegador com uma instalação Docker isolada para cada cliente. A contratação é sob consulta. Não há preços, depoimentos ou serviços de implantação/suporte prometidos.
 
 As fontes Vollkorn e Atkinson Hyperlegible Next vieram do repositório oficial Google Fonts. Os arquivos WOFF são derivados sem alteração do desenho; as licenças ficam ao lado dos arquivos. Nenhuma fonte ou imagem é carregada de terceiros durante a visita.
 
@@ -61,7 +61,7 @@ As ferramentas de geração são opcionais e não são necessárias para servir 
 python website/tools/create-previews.py
 ```
 
-O comando inicia um Vite separado em `127.0.0.1:5175`, sem carregar a configuração Electron, injeta `demo-bridge.js` e captura o renderer via Playwright CLI. A bridge só fornece dados fictícios e bloqueia operações não previstas; o navegador bloqueia requisições externas. Não há conexão com MariaDB, leitura da configuração da operação, atualização do aplicativo ou envio de mensagens. A data do navegador fica em 06/10/2026 para manter os exemplos reproduzíveis. O processo fecha sua sessão de captura e o servidor ao terminar. A porta 5175 precisa estar livre.
+O comando inicia um Vite separado em `127.0.0.1:5175`, com fixtures HTTP locais e captura o renderer via Playwright CLI. O servidor só fornece dados fictícios e bloqueia operações não previstas; o navegador bloqueia requisições externas. Não há conexão com MariaDB, leitura da configuração da operação, atualização do aplicativo ou envio de mensagens. A data do navegador fica em 06/10/2026 para manter os exemplos reproduzíveis. O processo fecha sua sessão de captura e o servidor ao terminar. A porta 5175 precisa estar livre.
 
 O npx obtém `@playwright/cli` se necessário, sem adicioná-lo às dependências do projeto. Os PNGs originais ficam em `assets/images/sources/`. `render-assets.cjs` converte essas capturas para WebP e AVIF em 960 e 1600 px e atualiza no HTML as dimensões reservadas. Para apenas reconverter os PNGs existentes:
 

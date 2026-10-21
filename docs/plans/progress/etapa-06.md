@@ -1,3 +1,5 @@
+> Registro histórico: a arquitetura desktop descrita neste documento foi superada pela aplicação exclusivamente web. Consulte `docs/architecture.md` para o fluxo vigente. Resultados de QA históricos não validam a versão atual.
+
 # Etapa 06 — Backend HTTP completo
 
 **Estado:** concluída para implementação e gate local. Nenhuma publicação ou implantação foi feita.

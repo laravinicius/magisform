@@ -10,11 +10,9 @@ import { LoadingState, ErrorState } from './Feedback';
 import { HighlightMatch } from './HighlightMatch';
 import { AdminAuthModal } from './AdminAuthModal';
 import { ConfirmModal } from './ConfirmModal';
-import { useAuth } from '../context/AuthContext';
 
 export function InsumoManager({ compact = false, onCreated, initialName }: { compact?: boolean; onCreated?: (m: Insumo) => void; initialName?: string } = {}) {
   const { data: insumos, loading, error, reload } = useData('insumos', activity => db.insumos.list(activity));
-  const { sessionToken } = useAuth();
   const [name, setName] = useState((initialName ?? '').toUpperCase());
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [rowDraft, setRowDraft] = useState('');
@@ -76,7 +74,7 @@ export function InsumoManager({ compact = false, onCreated, initialName }: { com
     if (pendingName === null) return;
     setSaving(true); setFormError(''); setSuccess(null);
     try {
-      const res: any = await db.insumos.add(pendingName, sessionToken ?? undefined);
+      const res: any = await db.insumos.add(pendingName);
       if (res?.success === false) { setFormError(res.error ?? 'Erro ao salvar.'); setPendingName(null); return; }
       if (onCreated) onCreated({ id: res.id, name: pendingName });
       setConfirmOpen(false);
@@ -97,7 +95,7 @@ export function InsumoManager({ compact = false, onCreated, initialName }: { com
 
   const handleDeleteConfirm = async (adminCreds?: { username: string; password: string }, token?: string) => {
     if (pendingDeleteId === null) return;
-    const res: any = await db.insumos.remove(pendingDeleteId, adminCreds, token ?? sessionToken ?? undefined);
+    const res: any = await db.insumos.remove(pendingDeleteId, adminCreds);
     if (!res?.success) { setFormError(res?.error ?? 'Erro ao excluir.'); return; }
     reload();
     setPendingDeleteId(null);
@@ -111,7 +109,7 @@ export function InsumoManager({ compact = false, onCreated, initialName }: { com
     if (dup) { setFormError(`Insumo já cadastrado: ${dup.name}`); return; }
     setSaving(true); setFormError('');
     try {
-      const res: any = await db.insumos.update(editingRow, trimmed, sessionToken ?? undefined);
+      const res: any = await db.insumos.update(editingRow, trimmed);
       if (res?.success === false) { setFormError(res.error ?? 'Erro ao salvar.'); return; }
       setEditingRow(null); setRowDraft('');
       reload();

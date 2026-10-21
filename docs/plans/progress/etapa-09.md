@@ -1,3 +1,5 @@
+> Registro histórico: a arquitetura desktop descrita neste documento foi superada pela aplicação exclusivamente web. Consulte `docs/architecture.md` para o fluxo vigente. Resultados de QA históricos não validam a versão atual.
+
 # Etapa 09 — Instalações independentes e marca por cliente
 
 **Estado:** implementação e verificações automatizadas concluídas no checkout. Gate operacional parcial: a imagem de release imutável pertence à etapa 10; não foi aplicada uma instalação real. A pendência de smoke do Electron empacotado local/remoto da etapa 08 continua aberta.

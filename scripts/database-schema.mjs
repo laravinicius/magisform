@@ -67,16 +67,17 @@ async function columns(conn, table) {
   return new Map(rows.map((row) => [row.COLUMN_NAME ?? row.column_name, row]));
 }
 
-async function assertKnownLegacy(conn) {
+async function assertKnownLegacy(conn, version = null) {
   const tables = await tableNames(conn);
   const requiredColumns = {
     users: ['id', 'name', 'username', 'password', 'role'],
     customers: ['id', 'name', 'phone', 'responsible_id'],
     insumos: ['id', 'name'],
-    formulas: ['id', 'customer_id', 'attendant_name', 'budget_number', 'delivery_date', 'delivered_at', 'payment_status', 'status'],
+    formulas: ['id', 'customer_id', 'attendant_name', 'budget_number', 'delivery_date', 'delivered_at', 'payment_status', 'partial_payment_amount', 'delivery_status', 'status', 'created_at', 'updated_at'],
     formula_items: ['id', 'formula_id', 'insumo_id', 'quantity', 'unit'],
     formula_budget_items: ['id', 'formula_id', 'quantity', 'unit', 'value', 'is_selected'],
-    saved_formulas: ['id', 'name', 'budget_number'],
+    saved_formulas: ['id', 'name', 'budget_number', 'created_at', 'updated_at'],
+    budget_number_registry: ['budget_number', 'source_type', 'source_id'],
     saved_formula_items: ['id', 'saved_formula_id', 'insumo_id', 'quantity', 'unit'],
     saved_formula_budget_items: ['id', 'saved_formula_id', 'quantity', 'unit', 'value'],
     sessions: ['id', 'user_id', 'token', 'last_seen', 'created_at'],
@@ -85,14 +86,14 @@ async function assertKnownLegacy(conn) {
   const required = Object.keys(requiredColumns);
   const missing = required.filter((name) => !tables.has(name));
   if (missing.length) throw new Error(`Preflight recusado: schema desconhecido; faltam tabelas: ${missing.join(', ')}.`);
-  if (tables.has('schema_version') || tables.has('schema_upgrade_history')) {
+  if (version === null && (tables.has('schema_version') || tables.has('schema_upgrade_history'))) {
     throw new Error('Preflight recusado: metadados incompletos ou inconsistentes; intervenção manual necessária.');
   }
   const columnsByTable = new Map(await Promise.all(required.map(async (table) => [table, await columns(conn, table)])));
   const mismatched = required.filter((table) => !requiredColumns[table].every((name) => columnsByTable.get(table).has(name)));
   const passwordColumn = columnsByTable.get('users').get('password');
   const passwordLength = Number(passwordColumn?.CHARACTER_MAXIMUM_LENGTH ?? passwordColumn?.character_maximum_length);
-  if (mismatched.length || passwordLength !== 64) {
+  if (mismatched.length || !(version === null ? [64] : version === 0 ? [64, 255] : [255]).includes(passwordLength)) {
     throw new Error('Preflight recusado: estrutura não corresponde ao legado suportado. Nenhuma alteração foi feita.');
   }
   const [engines] = await conn.execute(
@@ -101,6 +102,48 @@ async function assertKnownLegacy(conn) {
   );
   if (engines.length !== required.length || engines.some((row) => String(row.ENGINE ?? row.engine).toLowerCase() !== 'innodb')) {
     throw new Error('Preflight recusado: tabelas do legado precisam usar InnoDB.');
+  }
+}
+
+const upgrades = [
+  '001-password-session-expansion.sql',
+  '002-formula-pagination-order.sql',
+  '003-formula-authorship-units.sql',
+];
+// Snapshot de bootstrap publicado antes do schema v3; normalizado em LF.
+const previousBootstrapChecksum = '6438d5e84358613e4a638d40f6e8da9055248bed4779800479a92b5fde6dfbf9';
+async function validateVersion(conn, row, allowInterrupted = false) {
+  const version = Number(row.version);
+  if (!Number.isInteger(version) || version < (allowInterrupted ? 0 : 1) || version > 3) throw new Error('Schema incompatível com o executor v3.');
+  const schema = await fs.readFile(path.join(root, 'database.sql'), 'utf8');
+  if (row.source === 'bootstrap') {
+    const expected = version === 3 ? checksum(schema) : previousBootstrapChecksum;
+    if (row.checksum !== expected) throw new Error('Checksum de bootstrap divergente.');
+  } else if (row.source === 'upgrade') {
+    const sql = await fs.readFile(path.join(root, 'database/upgrades', upgrades[Math.max(1,version)-1]), 'utf8');
+    if (row.checksum !== checksum(sql)) throw new Error('Checksum de upgrade divergente.');
+    if (version > 0) {
+      const [history] = await conn.execute('SELECT checksum FROM schema_upgrade_history WHERE version=?', [version]);
+      if (history.length !== 1 || history[0].checksum !== row.checksum) throw new Error('Histórico de upgrade incompleto ou divergente.');
+    }
+  } else throw new Error('Origem de schema desconhecida.');
+  await assertKnownLegacy(conn, version);
+  if (version > 0) {
+    const sessionColumns = await columns(conn, 'sessions');
+    if (!['policy','expires_at','absolute_expires_at'].every(name => sessionColumns.has(name))) throw new Error('Estrutura de sessões incompatível.');
+  }
+  if (version >= 2) {
+    const [indexes] = await conn.query("SHOW INDEX FROM formulas WHERE Key_name='idx_formulas_created_id'");
+    if (indexes.length !== 2 || indexes[0].Column_name !== 'created_at' || indexes[1].Column_name !== 'id') throw new Error('Índice de paginação incompatível.');
+  }
+  for (const table of ['formulas','saved_formulas']) {
+    const column = (await columns(conn,table)).get('created_by_name');
+    if ((version === 3 && !column) || (column && String(column.COLUMN_TYPE ?? column.column_type).toLowerCase() !== 'varchar(255)')) throw new Error('Estrutura de autoria incompatível.');
+  }
+  for (const table of ['formula_budget_items','saved_formula_budget_items']) {
+    const column = (await columns(conn,table)).get('unit');
+    const type = String(column?.COLUMN_TYPE ?? column?.column_type).toLowerCase();
+    if (!(version === 3 ? ['varchar(16)'] : ['varchar(5)','varchar(16)']).includes(type)) throw new Error('Estrutura de unidades incompatível.');
   }
 }
 
@@ -147,8 +190,8 @@ async function runBootstrap() {
     await conn.changeUser({ database });
     const schema = await fs.readFile(path.join(root, 'database.sql'), 'utf8');
     for (const statement of statements(schema)) await conn.query(statement);
-    await createMetadata(conn, 2, 'bootstrap', checksum(schema));
-    console.log(`Bootstrap concluído: ${database}, schema v2. Nenhuma conta administrativa foi criada.`);
+    await createMetadata(conn, 3, 'bootstrap', checksum(schema));
+    console.log(`Bootstrap concluído: ${database}, schema v3. Nenhuma conta administrativa foi criada.`);
   } finally {
     try { await unlock(conn, lockName); } finally { await conn.end(); }
   }
@@ -169,22 +212,7 @@ async function runPreflight() {
     }
     const [rows] = await conn.execute('SELECT version, source, checksum FROM schema_version WHERE singleton = 1');
     if (rows.length !== 1) throw new Error('Preflight recusado: registro de versão ausente ou duplicado.');
-    const current = Number(rows[0].version);
-    if (![1, 2].includes(current)) throw new Error(`Schema v${rows[0].version} incompatível com este executor v2.`);
-    if (rows[0].source === 'upgrade' && current === 1) {
-      const migration = await fs.readFile(path.join(root, 'database/upgrades/001-password-session-expansion.sql'), 'utf8');
-      const expected = checksum(migration);
-      const [history] = await conn.execute('SELECT checksum FROM schema_upgrade_history WHERE version = 1');
-      if (!history.length || history[0].checksum !== expected || rows[0].checksum !== expected) {
-        throw new Error('Preflight recusado: checksum divergente ou histórico de upgrade incompleto. Restaure o backup ou corrija a origem auditada.');
-      }
-    }
-    if (current === 2 && rows[0].source === 'upgrade') {
-      const migration = await fs.readFile(path.join(root, 'database/upgrades/002-formula-pagination-order.sql'), 'utf8');
-      const expected = checksum(migration);
-      const [history] = await conn.execute('SELECT checksum FROM schema_upgrade_history WHERE version = 2');
-      if (!history.length || history[0].checksum !== expected || rows[0].checksum !== expected) throw new Error('Preflight recusado: checksum divergente ou histórico de upgrade v2 incompleto.');
-    }
+    await validateVersion(conn, rows[0]);
     console.log(`Preflight: schema v${rows[0].version} válido (${rows[0].source}).`);
   } finally {
     await conn.end();
@@ -206,36 +234,28 @@ async function runUpgrade() {
     }
     const [versions] = await conn.execute('SELECT version, source, checksum FROM schema_version WHERE singleton = 1');
     if (versions.length !== 1) throw new Error('Upgrade recusado: metadados de versão inconsistentes.');
+    await validateVersion(conn, versions[0], true);
     let current = Number(versions[0].version);
-    if (current > 2 || current < 0) throw new Error(`Upgrade recusado: schema v${current} incompatível com este executor v2.`);
-    if (current === 2) {
-      if (versions[0].source === 'upgrade') {
-        const migration2 = await fs.readFile(path.join(root, 'database/upgrades/002-formula-pagination-order.sql'), 'utf8');
-        const expected2 = checksum(migration2);
-        const [history2] = await conn.execute('SELECT checksum FROM schema_upgrade_history WHERE version = 2');
-        if (!history2.length || history2[0].checksum !== expected2 || versions[0].checksum !== expected2) throw new Error('Upgrade recusado: checksum divergente para v2.');
-      }
-      console.log(`Upgrade ignorado: ${database} já está no schema v2 com checksum válido.`);
+    if (current === 3) {
+      console.log(`Upgrade ignorado: ${database} já está no schema v3 com checksum válido.`);
       return;
     }
-    if (current === 0) {
-      if (versions[0].checksum !== migrationChecksum) throw new Error('Upgrade recusado: versão intermediária ou checksum incompatível.');
-      console.log(`Upgrade v1 iniciado em ${database}; mantenha a aplicação em manutenção.`);
-      for (const statement of statements(migration)) await conn.query(statement);
-      await conn.execute('INSERT INTO schema_upgrade_history (version, checksum) VALUES (1, ?) ON DUPLICATE KEY UPDATE checksum=VALUES(checksum), completed_at=CURRENT_TIMESTAMP', [migrationChecksum]);
-      await conn.execute("UPDATE schema_version SET version = 1, source = 'upgrade', checksum = ? WHERE singleton = 1 AND version = 0", [migrationChecksum]);
-      current = 1;
-    } else if (versions[0].source === 'upgrade') {
-      const [history1] = await conn.execute('SELECT checksum FROM schema_upgrade_history WHERE version = 1');
-      if (!history1.length || history1[0].checksum !== migrationChecksum || versions[0].checksum !== migrationChecksum) throw new Error('Upgrade recusado: checksum divergente para v1.');
+    for (let version = current + 1; version <= 3; version++) {
+      const sql = await fs.readFile(path.join(root, 'database/upgrades', upgrades[version-1]), 'utf8');
+      const digest = checksum(sql);
+      console.log(`Upgrade v${version} iniciado em ${database}; mantenha a aplicação em manutenção.`);
+      for (const statement of statements(sql)) await conn.query(statement);
+      // DDL e recuperacao sao idempotentes; metadados de conclusao usam transacao.
+      await conn.beginTransaction();
+      try {
+        await conn.execute('INSERT INTO schema_upgrade_history (version, checksum) VALUES (?, ?) ON DUPLICATE KEY UPDATE checksum=VALUES(checksum), completed_at=CURRENT_TIMESTAMP', [version, digest]);
+        await conn.execute("UPDATE schema_version SET version=?, source='upgrade', checksum=? WHERE singleton=1 AND version=?", [version, digest, version-1]);
+        await conn.commit();
+      } catch (error) { await conn.rollback(); throw error; }
     }
-    const migration2 = await fs.readFile(path.join(root, 'database/upgrades/002-formula-pagination-order.sql'), 'utf8');
-    const migrationChecksum2 = checksum(migration2);
-    console.log(`Upgrade v2 iniciado em ${database}; mantenha a aplicação em manutenção.`);
-    for (const statement of statements(migration2)) await conn.query(statement);
-    await conn.execute('INSERT INTO schema_upgrade_history (version, checksum) VALUES (2, ?) ON DUPLICATE KEY UPDATE checksum=VALUES(checksum), completed_at=CURRENT_TIMESTAMP', [migrationChecksum2]);
-    await conn.execute("UPDATE schema_version SET version = 2, source = 'upgrade', checksum = ? WHERE singleton = 1 AND version = 1", [migrationChecksum2]);
-    console.log(`Upgrade concluído: ${database} agora está no schema v2.`);
+    const [finalRows] = await conn.execute('SELECT version,source,checksum FROM schema_version WHERE singleton=1');
+    await validateVersion(conn, finalRows[0]);
+    console.log(`Upgrade concluído: ${database} agora está no schema v3.`);
   } finally {
     try { await unlock(conn, lockName); } finally { await conn.end(); }
   }

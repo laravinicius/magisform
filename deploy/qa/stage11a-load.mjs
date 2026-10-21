@@ -18,13 +18,13 @@ const execFileAsync = promisify(execFile);
 const password = (tenant) => `Etapa11QA_${tenant}_Synthet1c_${crypto.createHash('sha256').update(`STAGE11_QA_${tenant.toUpperCase()}`).digest('hex').slice(0, 8)}`;
 const stats = { usersPerInstallation: users, durationMinutes, requests: 0, failures5xx: 0, nonSuccess: 0, bytes: 0, latencies: {}, responseBytes: {}, rowsPerResponse: {}, startedAt: new Date().toISOString(), endedAt: null, samples: [] };
 
-function request(port, method, pathname, token, body) {
+function request(port, method, pathname, session, body) {
   return new Promise((resolve) => {
     const start = performance.now();
-    const req = http.request({ hostname: '127.0.0.1', port, method, path: pathname, headers: { host: `127.0.0.1:${port}`, ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) } }, (res) => {
+    const req = http.request({ hostname: '127.0.0.1', port, method, path: pathname, headers: { host: `127.0.0.1:${port}`, ...(session ? { origin: `http://127.0.0.1:${port}`, cookie: session.cookie, 'x-csrf-token': session.csrf } : {}), ...(body ? { 'content-type': 'application/json' } : {}) } }, (res) => {
       let bytes = 0; let data = '';
       res.on('data', chunk => { bytes += chunk.length; data += chunk.toString('utf8'); });
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, ms: performance.now() - start, bytes, payload: (() => { try { return JSON.parse(data); } catch { return null; } })() }));
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, ms: performance.now() - start, bytes, headers: res.headers, payload: (() => { try { return JSON.parse(data); } catch { return null; } })() }));
     });
     req.setTimeout(30_000, () => req.destroy(new Error('timeout')));
     req.on('error', () => resolve({ status: 0, ms: performance.now() - start, bytes: 0, payload: null }));
@@ -35,10 +35,12 @@ function request(port, method, pathname, token, body) {
 
 async function login(target, index) {
   const username = `s11load${target.tenant}${String(index).padStart(2, '0')}`;
-  const result = await request(target.port, 'POST', '/api/v1/auth/desktop/login', undefined, { username, password: password(target.tenant), force: true });
-  const token = result.payload?.data?.token;
-  if (!token) throw new Error(`Login QA ${target.tenant}/${index} falhou (HTTP ${result.status}).`);
-  return token;
+  const csrf = await request(target.port, 'GET', '/api/v1/auth/csrf');
+  const session = { cookie: (csrf.headers['set-cookie'] ?? []).map(value => value.split(';')[0]).join('; '), csrf: csrf.payload?.data?.csrfToken };
+  const result = await request(target.port, 'POST', '/api/v1/auth/login', session, { username, password: password(target.tenant), force: true });
+  if (result.status !== 200) throw new Error(`Login QA ${target.tenant}/${index} falhou (HTTP ${result.status}).`);
+  session.cookie += '; ' + (result.headers['set-cookie'] ?? []).map(value => value.split(';')[0]).join('; ');
+  return session;
 }
 
 async function dockerMetrics() {
@@ -58,7 +60,7 @@ async function dockerMetrics() {
 
 const percentile = (values, p) => { const sorted = [...values].sort((a, b) => a - b); return sorted.length ? Number(sorted[Math.ceil(sorted.length * p) - 1].toFixed(2)) : null; };
 const sessions = [];
-for (const target of targets) for (let index = 1; index <= users; index++) sessions.push({ ...target, index, token: await login(target, index) });
+for (const target of targets) for (let index = 1; index <= users; index++) sessions.push({ ...target, index, session: await login(target, index) });
 
 const stopAt = Date.now() + durationMinutes * 60_000;
 let lastMetrics = 0;
@@ -67,7 +69,7 @@ async function worker(session) {
   while (Date.now() < stopAt) {
     const formulaPath = `/api/v1/formulas?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     for (const pathname of [formulaPath, '/api/v1/health/ready']) {
-      const result = await request(session.port, 'GET', pathname, session.token);
+      const result = await request(session.port, 'GET', pathname, session.session);
       stats.requests++; stats.bytes += result.bytes;
       const key = `${session.tenant}:${pathname.startsWith('/api/v1/formulas') ? 'GET /api/v1/formulas' : 'GET /api/v1/health/ready'}`;
       (stats.latencies[key] ??= []).push(result.ms);

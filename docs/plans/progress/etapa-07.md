@@ -1,3 +1,5 @@
+> Registro histórico: a arquitetura desktop descrita neste documento foi superada pela aplicação exclusivamente web. Consulte `docs/architecture.md` para o fluxo vigente. Resultados de QA históricos não validam a versão atual.
+
 # Etapa 07 — Aplicação web com paridade funcional
 
 **Estado:** concluída para o escopo e os critérios de validação desta etapa. Nenhuma publicação ou implantação foi feita.

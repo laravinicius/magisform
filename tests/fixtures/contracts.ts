@@ -9,6 +9,7 @@ export const fixtureCustomer: CustomerDto = {
 };
 
 export const fixtureFormula: FormulaDto = {
+  created_by_name: null,
   id: 70001,
   customer_id: fixtureCustomer.id,
   customer_name: fixtureCustomer.name,

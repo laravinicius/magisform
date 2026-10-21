@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { z, ZodError } from 'zod';
+import { BusinessRuleError } from '../core/dbError.js';
 import { Db } from '../core/db.js';
 import type { DataEnvelopeDto } from '../shared/contracts.js';
 import type { ServerConfig } from './config.js';
@@ -30,11 +31,13 @@ const statusBody = z.object({ status: z.string().trim().min(1).max(40) });
 const deliveryBatch = z.object({ ids: z.array(id).min(1).max(500), status: z.string().trim().min(1).max(40) });
 const logQuery = z.object({ userId: z.string().regex(/^[1-9]\d*$/).optional(), action: z.string().max(100).optional(), entity: z.string().max(100).optional(), from: z.string().max(30).optional(), to: z.string().max(30).optional(), search: z.string().max(200).optional(), page: z.string().regex(/^\d+$/).optional(), pageSize: z.string().regex(/^\d+$/).optional() });
 const formulaQuery = z.object({ cursor: z.string().max(512).optional(), limit: z.string().regex(/^[1-9]\d*$/).refine((value) => Number(value) <= 100).optional(), statuses: z.string().max(100).optional(), deliveryStatus: z.string().max(40).optional(), search: z.string().max(100).optional() });
-const formulaSummaryQuery = z.object({ month: z.string().regex(/^(0|[1-9]|1[01])$/), year: z.string().regex(/^\d{4}$/) });
+const paymentUpdate = z.object({ payment_status: z.enum(['pago','parcial','pagar_na_retirada']), partial_payment_amount: z.number().nullable() });
+const formulaSummaryQuery = z.object({ paymentStatus: z.enum(['pago','parcial','pagar_na_retirada','nao_pago']).default('pago'), month: z.string().regex(/^(0|[1-9]|1[01])$/), year: z.string().regex(/^\d{4}$/) });
 
 type AppOptions = { config: ServerConfig; db?: Db; pool?: mysql.Pool; closePool?: boolean };
 
 function codeFor(error: unknown): { status: number; code: string; message: string } {
+  if (error instanceof BusinessRuleError) return { status: error.status, code: error.status === 400 ? 'VALIDATION_ERROR' : error.status === 404 ? 'NOT_FOUND' : 'CONFLICT', message: error.message };
   const message = error instanceof Error ? error.message : '';
   if (/Sessão obrigatória|Sessão inválida|expirada|revogada/i.test(message)) return { status: 401, code: 'UNAUTHENTICATED', message: 'Sessão inválida ou expirada.' };
   if (/permiss|autorizad|manager|gerente|privilégio|credenciais administrativas|restrito à administração/i.test(message)) return { status: 403, code: 'FORBIDDEN', message: 'Acesso não autorizado.' };
@@ -72,7 +75,6 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
   await app.register(swagger, { openapi: {
     info: { title: 'MagisForm API', version: config.version }, servers: [{ url: config.origin }], tags: [{ name: 'auth' }, { name: 'data' }, { name: 'health' }],
     components: { securitySchemes: {
-      BearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'token de sessão desktop' },
       CookieAuth: { type: 'apiKey', in: 'cookie', name: '__Host-magisform_session' },
     }, schemas: {
       UserDto: { type: 'object', required: ['id','name','username','role'], properties: { id: { type: 'integer' }, name: { type: 'string' }, username: { type: 'string' }, role: { type: 'string', enum: ['employee','pharmacist','manager','admin'] } } },
@@ -92,7 +94,7 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
     request.log.info({ requestId: request.id, installation: config.installationName, operation: `${request.method} ${request.routeOptions.url ?? 'not-found'}`, statusCode: reply.statusCode }, 'Requisição concluída');
   });
   app.addHook('onRequest', async (request, reply) => {
-    if (request.method !== 'POST' || !['/api/v1/auth/login','/api/v1/auth/desktop/login'].includes(request.url.split('?')[0])) return;
+    if (request.method !== 'POST' || request.url.split('?')[0] !== '/api/v1/auth/login') return;
     const now = Date.now();
     const current = loginIpWindows.get(request.ip);
     if (!current || current.resetAt <= now) loginIpWindows.set(request.ip, { count: 1, resetAt: now + 15 * 60_000 });
@@ -121,6 +123,10 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
     return reply.code(mapped.status).send({ error: { code: mapped.code, message: mapped.message, requestId: request.id } });
   });
 
+  app.addHook('onRequest', async request => {
+    if (request.headers.authorization !== undefined) throw Object.assign(new Error('Authorization não é permitido na API web.'), { statusCode: 400 });
+  });
+
   const originAndCsrf = (request: FastifyRequest, includeLogin = false) => {
     if (request.headers.origin !== config.origin) throw Object.assign(new Error('Origem inválida'), { statusCode: 403 });
     if (includeLogin || request.cookies[sessionCookie]) {
@@ -129,18 +135,8 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
       if (!csrf || typeof header !== 'string' || !safeEqual(csrf, header)) throw Object.assign(new Error('CSRF inválido'), { statusCode: 403 });
     }
   };
-  const guardMutation = (request: FastifyRequest, url: string) => {
-    if (url === '/auth/login' || request.cookies[sessionCookie]) return originAndCsrf(request, url === '/auth/login');
-    if (request.headers.authorization && request.headers.origin) throw Object.assign(new Error('Origin não permitido para cliente desktop'), { statusCode: 400 });
-  };
-  const resolveToken = (request: FastifyRequest) => {
-    const auth = request.headers.authorization;
-    const bearer = auth?.match(/^Bearer ([A-Za-z0-9_-]{32,128})$/)?.[1];
-    const cookieToken = request.cookies[sessionCookie];
-    if (bearer && cookieToken) throw Object.assign(new Error('Credenciais ambíguas'), { statusCode: 400 });
-    if (auth && !bearer) throw Object.assign(new Error('Bearer inválido'), { statusCode: 401 });
-    return bearer ?? cookieToken;
-  };
+  const guardMutation = (request: FastifyRequest, url: string) => originAndCsrf(request, url === '/auth/login');
+  const resolveToken = (request: FastifyRequest) => request.cookies[sessionCookie];
   const withSession = async <T>(request: FastifyRequest, fn: (token: string) => Promise<T>, activityEligible = false) => {
     const token = resolveToken(request);
     if (!token) throw Object.assign(new Error('Sessão obrigatória'), { statusCode: 401 });
@@ -152,7 +148,12 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
     const bodySchema = opts.validation ? z.toJSONSchema(opts.validation, { target: 'draft-7' }) : undefined;
     const querySchema = opts.queryValidation ? z.toJSONSchema(opts.queryValidation, { target: 'draft-7' }) : undefined;
     const paramsSchema = url.includes('/:id') ? { type: 'object', properties: { id: { type: 'string', pattern: '^[1-9]\\d*$' } }, required: ['id'] } : undefined;
-    app.route({ method, url: `/api/v1${url}`, schema: { tags: [url.startsWith('/health') ? 'health' : url.startsWith('/auth') ? 'auth' : 'data'], ...((opts.auth || opts.security) ? { security: [{ BearerAuth: [] }, { CookieAuth: [] }] } : {}), ...(bodySchema ? { body: bodySchema } : {}), ...(querySchema ? { querystring: querySchema } : {}), ...(paramsSchema ? { params: paramsSchema } : {}), response: { 200: { type: 'object', properties: { data: {} }, required: ['data'] } }, ...opts.schema }, config: opts.config, handler: async (request, reply) => {
+    app.route({ method, url: `/api/v1${url}`, schema: {
+      tags: [url.startsWith('/health') ? 'health' : url.startsWith('/auth') ? 'auth' : 'data'],
+      ...((opts.auth || opts.security) ? { security: [{ CookieAuth: [] }] } : {}),
+      ...(bodySchema ? { body: bodySchema } : {}), ...(querySchema ? { querystring: querySchema } : {}), ...(paramsSchema ? { params: paramsSchema } : {}),
+      response: { 200: { type: 'object', properties: { data: {} }, required: ['data'] } }, ...opts.schema,
+    }, config: opts.config, handler: async (request, reply) => {
       if (opts.mutating) guardMutation(request, url);
       if (opts.auth) return withSession(request, async () => handler(request, reply), !url.startsWith('/auth/'));
       return handler(request, reply);
@@ -176,28 +177,21 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
     try {
       await pool.query('SELECT 1');
       const [rows] = await pool.query<mysql.RowDataPacket[]>('SELECT version FROM schema_version WHERE singleton=1 LIMIT 1');
-      if (!rows.length || Number(rows[0].version) !== 2) throw new Error('Schema ausente ou incompatível');
+      if (!rows.length || Number(rows[0].version) !== 3) throw new Error('Schema ausente ou incompatível');
       return { data: { status: 'ready' } };
     }
     catch { return reply.code(503).send({ error: { code: 'UNAVAILABLE', message: 'Serviço temporariamente indisponível.', requestId: reply.request.id } }); }
   });
-  addRoute('GET','/public-config', async () => data({ installationName: config.installationName, brand: config.brand, brandTheme: config.brandTheme, version: config.version, capabilities: ['web','desktop-remote'] }));
+  addRoute('GET','/public-config', async () => data({ installationName: config.installationName, brand: config.brand, brandTheme: config.brandTheme, version: config.version, capabilities: ['web'] }));
   addRoute('GET','/auth/csrf', async (_req, reply) => { const token = randomBytes(32).toString('base64url'); reply.setCookie(csrfCookie, token, cookieOpts); return data({ csrfToken: token }); });
   addRoute('POST','/auth/login', async (req, reply) => {
     if (req.headers.authorization) throw Object.assign(new Error('Credenciais ambíguas'), { statusCode: 400 });
     const input = parsed(credentials.extend({ force: z.boolean().optional() }), req.body);
-    const result = await db.login(input.username, input.password, input.force ?? false, 'hosted');
+    const result = await db.login(input.username, input.password, input.force ?? false);
     if (!result.success) throw Object.assign(new Error(result.conflict ? 'SESSION_CONFLICT' : result.error ?? 'Credenciais inválidas'), { statusCode: result.conflict ? 409 : 401 });
     reply.setCookie(sessionCookie, result.sessionToken!, { path: '/', httpOnly: true, secure: config.secure, sameSite: 'lax' });
     return data({ user: result.user });
   }, { mutating: true, config: rate, validation: credentials.extend({ force: z.boolean().optional() }) });
-  addRoute('POST','/auth/desktop/login', async (req) => {
-    if (req.headers.origin || req.cookies[sessionCookie] || req.headers.authorization) throw Object.assign(new Error('Requisição desktop inválida'), { statusCode: 400 });
-    const input = parsed(credentials.extend({ force: z.boolean().optional() }), req.body);
-    const result = await db.login(input.username, input.password, input.force ?? false, 'hosted');
-    if (!result.success) throw Object.assign(new Error(result.conflict ? 'SESSION_CONFLICT' : result.error ?? 'Credenciais inválidas'), { statusCode: result.conflict ? 409 : 401 });
-    return data({ user: result.user, token: result.sessionToken });
-  }, { config: rate, validation: credentials.extend({ force: z.boolean().optional() }) });
   addRoute('GET','/auth/me', async (req) => withSession(req, async (token) => {
     const result = await db.getSessionUser(token);
     if (!result.user) throw new Error('Sessão inválida ou expirada.');
@@ -236,7 +230,7 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
     if (statuses.some((status) => !['pending','confirmed','cancelled','delivered'].includes(status))) throw Object.assign(new Error('Filtro de status inválido.'), { statusCode: 400 });
     return data(await db.listFormulas({ cursor: q.cursor, limit: Number(q.limit), statuses: statuses as any, deliveryStatus: q.deliveryStatus, search: q.search }));
   }, { ...common, queryValidation: formulaQuery });
-  addRoute('GET', '/formulas-summary', wrapped(async (req) => { const q = parsed(formulaSummaryQuery, req.query); return db.getFormulaSummary(Number(q.month), Number(q.year)); }), common);
+  addRoute('GET', '/formulas-summary', wrapped(async (req) => { const q = parsed(formulaSummaryQuery, req.query); return db.getFormulaSummary(Number(q.month), Number(q.year), q.paymentStatus); }), common);
   addRoute('GET', '/formulas/:id', wrapped(async (req) => db.getFormula(paramId(req))), common);
   addRoute('POST', '/formulas', wrapped(async (req) => db.addFormula(parsed(formulaInput, req.body))), { ...common, mutating: true, validation: formulaInput });
   addRoute('PATCH', '/formulas/:id', wrapped(async (req) => db.updateFormula(paramId(req), parsed(formulaInput, req.body))), { ...common, mutating: true, validation: formulaInput });
@@ -248,6 +242,7 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
   }, (i,v) => db.deleteSavedFormula(i,v), savedInput, savedInput.partial().refine((v) => Object.keys(v).length > 0));
   addRoute('PATCH','/formulas/:id/status', wrapped(async (req) => db.updateFormulaStatus(paramId(req), parsed(statusBody,req.body).status)), { ...common, mutating: true, validation: statusBody });
   addRoute('PATCH','/formulas/:id/delivery-status', wrapped(async (req) => db.updateFormulaDeliveryStatus(paramId(req), parsed(statusBody,req.body).status)), { ...common, mutating: true, validation: statusBody });
+  addRoute('PATCH','/formulas/:id/payment', wrapped(async (req) => db.updateFormulaPayment(paramId(req), (() => { const payment = parsed(paymentUpdate,req.body); return { payment_status: payment.payment_status, partial_payment_amount: payment.partial_payment_amount ?? null }; })())), { ...common, mutating: true, validation: paymentUpdate });
   addRoute('POST','/formulas/:id/verification', wrapped(async (req) => db.verifyFormula(paramId(req))), { ...common, mutating: true });
   addRoute('PATCH','/formulas/delivery-status-batch', wrapped(async (req) => { const b = parsed(deliveryBatch,req.body); return db.updateFormulasDeliveryStatus(b.ids,b.status); }), { ...common, mutating: true, validation: deliveryBatch });
   addRoute('GET','/logs', wrapped(async (req) => {

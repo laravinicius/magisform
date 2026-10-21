@@ -1,5 +1,5 @@
 interface PerfMetrics {
-  ipcTimings: Map<string, number[]>;
+  httpTimings: Map<string, number[]>;
   queryCounts: Map<string, number>;
   reloadCounts: Map<string, number>;
   heartbeatCount: number;
@@ -7,7 +7,7 @@ interface PerfMetrics {
 }
 
 const metrics: PerfMetrics = {
-  ipcTimings: new Map(),
+  httpTimings: new Map(),
   queryCounts: new Map(),
   reloadCounts: new Map(),
   heartbeatCount: 0,
@@ -15,15 +15,15 @@ const metrics: PerfMetrics = {
 };
 
 function getTimings(key: string): number[] {
-  let arr = metrics.ipcTimings.get(key);
+  let arr = metrics.httpTimings.get(key);
   if (!arr) {
     arr = [];
-    metrics.ipcTimings.set(key, arr);
+    metrics.httpTimings.set(key, arr);
   }
   return arr;
 }
 
-export function recordIpcTiming(key: string, durationMs: number) {
+export function recordHttpTiming(key: string, durationMs: number) {
   getTimings(key).push(durationMs);
 }
 
@@ -45,7 +45,7 @@ export function recordConcurrentLoad(key: string) {
 
 export function getMetrics() {
   const summary: Record<string, any> = {};
-  for (const [key, arr] of metrics.ipcTimings) {
+  for (const [key, arr] of metrics.httpTimings) {
     const sorted = [...arr].sort((a, b) => a - b);
     const sum = sorted.reduce((a, b) => a + b, 0);
     summary[key] = {
@@ -59,7 +59,7 @@ export function getMetrics() {
     };
   }
   return {
-    ipcTimings: summary,
+    httpTimings: summary,
     queryCounts: Object.fromEntries(metrics.queryCounts),
     reloadCounts: Object.fromEntries(metrics.reloadCounts),
     heartbeatCount: metrics.heartbeatCount,
@@ -68,7 +68,7 @@ export function getMetrics() {
 }
 
 export function resetMetrics() {
-  metrics.ipcTimings.clear();
+  metrics.httpTimings.clear();
   metrics.queryCounts.clear();
   metrics.reloadCounts.clear();
   metrics.heartbeatCount = 0;

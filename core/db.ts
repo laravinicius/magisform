@@ -2,8 +2,8 @@ import crypto from 'crypto';
 import { hash as argonHash, verify as argonVerify } from '@node-rs/argon2';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import mysql from 'mysql2/promise';
-import type { FormulaListQueryDto, FormulaListPageDto, FormulaSummaryDto, FormulaDto } from '../shared/contracts.js';
-import { formatDbError, isUnsupportedAuthPluginError } from './dbError.js';
+import type { FormulaListQueryDto, FormulaListPageDto, FormulaSummaryDto, FormulaDto, FormulaPaymentUpdate, SummaryPaymentStatus } from '../shared/contracts.js';
+import { BusinessRuleError, formatDbError, isUnsupportedAuthPluginError } from './dbError.js';
 import { getDeliveryTimestamp } from './deliveryTime.js';
 
 interface AdminVerifyResult {
@@ -25,7 +25,7 @@ const passwordHash = (s: string) => argonHash(s, {
 const legacyHash = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 const sessionTokenDigest = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 const contexts = new AsyncLocalStorage<{
-  kind: 'system' | 'setup' | 'session';
+  kind: 'system' | 'session';
   user?: { id: number; name: string; username: string; role: string };
   connection?: mysql.PoolConnection;
 }>();
@@ -135,19 +135,6 @@ export class Db {
     });
   }
 
-  async withSetupContext<T>(callback: () => Promise<T>): Promise<T> {
-    if (!this.pool) throw new Error('Sem conexão com o servidor.');
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const value = await contexts.run({ kind: 'setup', connection }, callback);
-      if (value && typeof value === 'object' && 'success' in value && (value as any).success === false) await connection.rollback();
-      else await connection.commit();
-      return value;
-    } catch (error) { await connection.rollback(); throw error; }
-    finally { connection.release(); }
-  }
-
   private withSystemContext<T>(callback: () => Promise<T>): Promise<T> {
     const current = contexts.getStore();
     return contexts.run({ ...current, kind: 'system' }, callback);
@@ -185,7 +172,6 @@ export class Db {
   // ── Sessões (login único) ──────────────────────────────────────────────────────
 
   // Sessão considerada morta se o último heartbeat passar deste limite
-  static readonly SESSION_TTL_SECONDS = 120;
   static HOSTED_SESSION_TTL_SECONDS = 28_800;
   static HOSTED_ABSOLUTE_TTL_SECONDS = 86_400;
 
@@ -196,7 +182,6 @@ export class Db {
     Db.HOSTED_SESSION_TTL_SECONDS = idleSeconds;
     Db.HOSTED_ABSOLUTE_TTL_SECONDS = absoluteSeconds;
   }
-  static readonly DESKTOP_ABSOLUTE_TTL_SECONDS = 2_592_000;
 
   async revokeSession(token: string): Promise<void> {
     if (!this.pool) return;
@@ -220,9 +205,9 @@ export class Db {
     try {
       const r: any = await this.withSystemContext(() => this.q(
         `UPDATE sessions SET last_seen=NOW(), expires_at=LEAST(absolute_expires_at,
-         DATE_ADD(NOW(), INTERVAL CASE policy WHEN 'hosted' THEN ? ELSE ? END SECOND))
-         WHERE token=? AND expires_at>NOW() AND absolute_expires_at>NOW()`,
-        [Db.HOSTED_SESSION_TTL_SECONDS, Db.SESSION_TTL_SECONDS, sessionTokenDigest(token)]));
+         DATE_ADD(NOW(), INTERVAL ? SECOND))
+         WHERE token=? AND policy='hosted' AND expires_at>NOW() AND absolute_expires_at>NOW()`,
+        [Db.HOSTED_SESSION_TTL_SECONDS, sessionTokenDigest(token)]));
       return { valid: (r?.affectedRows ?? 0) > 0 };
     } catch (e) {
       return { valid: false };
@@ -232,18 +217,17 @@ export class Db {
   async cleanupStaleSessions(): Promise<void> {
     await this.withSystemContext(() => this.q(`DELETE FROM sessions
       WHERE expires_at<=NOW() OR absolute_expires_at<=NOW()
-        OR (policy='desktop_local' AND last_seen<NOW()-INTERVAL ? SECOND)
+        OR policy<>'hosted'
         OR (policy='hosted' AND last_seen<NOW()-INTERVAL ? SECOND)`,
-      [Db.SESSION_TTL_SECONDS, Db.HOSTED_SESSION_TTL_SECONDS]));
+      [Db.HOSTED_SESSION_TTL_SECONDS]));
   }
 
   // ── Logs de auditoria ────────────────────────────────────────────────────────
 
-  // Resolve o usuário dono da sessão a partir do token (null + 'Configuração' p/ setup)
+  // Resolve o ator da operação a partir da sessão validada.
   private async resolveActor(token?: string): Promise<{ id: number | null; name: string }> {
     const context = contexts.getStore();
     if (context?.kind === 'session' && context.user) return { id: context.user.id, name: context.user.name };
-    if (context?.kind === 'setup') return { id: null, name: 'Configuração' };
     if (!token || !this.pool) return { id: null, name: 'Configuração' };
     try {
       const rows = await this.q<any[]>(
@@ -274,8 +258,7 @@ export class Db {
       if (context?.kind === 'session' && context.user) {
         userId = context.user.id;
         userName = context.user.name;
-      } else if (context?.kind === 'setup') {
-        userName = 'Configuração';
+
       } else if (typeof actor === 'string') {
         userName = actor;
       } else if (actor) {
@@ -350,8 +333,8 @@ export class Db {
          FROM sessions s
          JOIN users u ON s.user_id = u.id
          WHERE s.token = ? AND s.expires_at>NOW() AND s.absolute_expires_at>NOW()
-           AND s.last_seen >= NOW() - INTERVAL CASE s.policy WHEN 'hosted' THEN ? ELSE ? END SECOND`,
-        [sessionTokenDigest(token), Db.HOSTED_SESSION_TTL_SECONDS, Db.SESSION_TTL_SECONDS]
+           AND s.policy='hosted' AND s.last_seen >= NOW() - INTERVAL ? SECOND`,
+        [sessionTokenDigest(token), Db.HOSTED_SESSION_TTL_SECONDS]
       ));
       if (rows.length === 0) {
         return { error: 'Sessão inválida ou expirada' };
@@ -364,7 +347,7 @@ export class Db {
 
   // ── Auth ──────────────────────────────────────────────────────────────────────
 
-  async login(username: string, password: string, force = false, mode: 'desktop-local' | 'hosted' = 'desktop-local'): Promise<{
+  async login(username: string, password: string, force = false): Promise<{
     success: boolean; user?: any; sessionToken?: string; conflict?: boolean; error?: string;
   }> {
     return this.withSystemContext(async () => {
@@ -385,9 +368,9 @@ export class Db {
       }
       const user = { id: rows[0].id, name: rows[0].name, username: rows[0].username, role: rows[0].role };
       await conn.query(`DELETE FROM sessions WHERE user_id=? AND (expires_at<=NOW() OR absolute_expires_at<=NOW()
-        OR (policy='desktop_local' AND last_seen<NOW()-INTERVAL ? SECOND)
+        OR policy<>'hosted'
         OR (policy='hosted' AND last_seen<NOW()-INTERVAL ? SECOND))`,
-        [user.id, Db.SESSION_TTL_SECONDS, Db.HOSTED_SESSION_TTL_SECONDS]);
+        [user.id, Db.HOSTED_SESSION_TTL_SECONDS]);
       const [active]: any = await conn.query(
         'SELECT id FROM sessions WHERE user_id = ? FOR UPDATE', [user.id]);
       if (active.length > 0 && !force) {
@@ -401,7 +384,9 @@ export class Db {
           [user.id, user.name, 'logout', 'system', user.id, 'Sessão anterior encerrada por login forçado.']);
         await conn.query('DELETE FROM sessions WHERE user_id = ?', [user.id]);
       }
-      const { policy, idle, absolute } = this.sessionPolicy(mode);
+      const policy = 'hosted';
+      const idle = Db.HOSTED_SESSION_TTL_SECONDS;
+      const absolute = Db.HOSTED_ABSOLUTE_TTL_SECONDS;
       const token = crypto.randomBytes(32).toString('hex');
       await conn.query(`UPDATE users SET password=? WHERE id=? AND password=?`, [
         storedPassword.startsWith('$argon2id$') ? storedPassword : await passwordHash(password), user.id, storedPassword,
@@ -422,11 +407,6 @@ export class Db {
     });
   }
 
-  private sessionPolicy(mode: 'desktop-local' | 'hosted') {
-    return mode === 'hosted'
-      ? { policy: 'hosted', idle: Db.HOSTED_SESSION_TTL_SECONDS, absolute: Db.HOSTED_ABSOLUTE_TTL_SECONDS }
-      : { policy: 'desktop_local', idle: Db.SESSION_TTL_SECONDS, absolute: Db.DESKTOP_ABSOLUTE_TTL_SECONDS };
-  }
 
   async assertPrivilegedSession(): Promise<{ id: number; name: string; username: string; role: string }> {
     const context = contexts.getStore();
@@ -451,14 +431,11 @@ export class Db {
     return this.assertPrivilegedSession().then(() => this.q('SELECT id, name, username, role FROM users ORDER BY name'));
   }
 
-  async addUser(user: { name: string; username: string; password: string; role: string }, sessionToken?: string, setupAuthorized = false) {
+  async addUser(user: { name: string; username: string; password: string; role: string }, sessionToken?: string) {
     this.assertOperationContext();
-    if (setupAuthorized && contexts.getStore()?.kind !== 'setup') return { success: false, error: 'Modo de configuração inválido.' };
     try {
-      if (!setupAuthorized) {
-        const access = await this.checkAdminAccess(undefined, sessionToken);
-        if (!access.success) return { success: false, error: access.error };
-      }
+      const access = await this.checkAdminAccess(undefined, sessionToken);
+      if (!access.success) return { success: false, error: access.error };
       if (!['admin', 'manager', 'pharmacist', 'employee'].includes(user.role)) {
         return { success: false, error: 'Perfil inválido.' };
       }
@@ -481,18 +458,12 @@ export class Db {
     }
   }
 
-  async updateUser(id: number, user: { name: string; username: string; password?: string; role: string }, sessionToken?: string, setupAuthorized = false) {
+  async updateUser(id: number, user: { name: string; username: string; password?: string; role: string }, sessionToken?: string) {
     this.assertOperationContext();
-    if (setupAuthorized && contexts.getStore()?.kind !== 'setup') return { success: false, error: 'Modo de configuração inválido.' };
     try {
-      let actor: { id: number | null; name: string };
-      if (!setupAuthorized) {
-        const access = await this.checkAdminAccess(undefined, sessionToken);
-        if (!access.success) return { success: false, error: access.error };
-        actor = { id: access.user!.id, name: access.user!.name };
-      } else {
-        actor = { id: null, name: 'Configuração' };
-      }
+      const access = await this.checkAdminAccess(undefined, sessionToken);
+      if (!access.success) return { success: false, error: access.error };
+      const actor = { id: access.user!.id, name: access.user!.name };
       if (!['admin', 'manager', 'pharmacist', 'employee'].includes(user.role)) {
         return { success: false, error: 'Perfil inválido.' };
       }
@@ -753,7 +724,7 @@ export class Db {
     if (query.deliveryStatus) { conditions.push('f.delivery_status = ?'); params.push(query.deliveryStatus); }
     if (search) {
       const like = `%${search}%`;
-      conditions.push(`(CAST(f.id AS CHAR) LIKE ? OR c.name LIKE ? OR COALESCE(f.customer_phone,'') LIKE ? OR COALESCE(f.attendant_name,'') LIKE ? OR COALESCE(f.budget_number,'') LIKE ? OR COALESCE(CAST(f.delivery_date AS CHAR),'') LIKE ? OR DATE_FORMAT(f.created_at,'%d/%m/%Y') LIKE ? OR DATE_FORMAT(f.delivered_at,'%d/%m/%Y') LIKE ? OR f.status LIKE ? OR CASE f.status WHEN 'cancelled' THEN 'Cancelada' WHEN 'delivered' THEN 'Entregue' ELSE f.status END LIKE ? OR COALESCE(f.payment_status,'') LIKE ? OR CASE f.payment_status WHEN 'pago' THEN 'Pago' WHEN 'parcial' THEN 'Parcial' WHEN 'pagar_na_retirada' THEN 'Pagar na retirada' ELSE COALESCE(f.payment_status,'') END LIKE ? OR CASE WHEN f.manager_verified=1 THEN 'Verificado' ELSE 'Não verificado' END LIKE ? OR COALESCE(f.cancel_reason,'') LIKE ? OR EXISTS (SELECT 1 FROM formula_items fi JOIN insumos m ON m.id=fi.insumo_id WHERE fi.formula_id=f.id AND (m.name LIKE ? OR CAST(fi.quantity AS CHAR) LIKE ? OR fi.unit LIKE ?)) OR EXISTS (SELECT 1 FROM formula_budget_items bi WHERE bi.formula_id=f.id AND (bi.unit LIKE ? OR CAST(bi.quantity AS CHAR) LIKE ? OR CAST(bi.value AS CHAR) LIKE ? OR REPLACE(CAST(bi.value AS CHAR),'.',',') LIKE ?) AND bi.is_selected=1))`);
+      conditions.push(`(CAST(f.id AS CHAR) LIKE ? OR c.name LIKE ? OR COALESCE(f.customer_phone,'') LIKE ? OR CONCAT_WS(' ',f.attendant_name,f.created_by_name) LIKE ? OR COALESCE(f.budget_number,'') LIKE ? OR COALESCE(CAST(f.delivery_date AS CHAR),'') LIKE ? OR DATE_FORMAT(f.created_at,'%d/%m/%Y') LIKE ? OR DATE_FORMAT(f.delivered_at,'%d/%m/%Y') LIKE ? OR f.status LIKE ? OR CASE f.status WHEN 'cancelled' THEN 'Cancelada' WHEN 'delivered' THEN 'Entregue' ELSE f.status END LIKE ? OR COALESCE(f.payment_status,'') LIKE ? OR CASE f.payment_status WHEN 'pago' THEN 'Pago' WHEN 'parcial' THEN 'Parcial' WHEN 'pagar_na_retirada' THEN 'Pagar na retirada' ELSE COALESCE(f.payment_status,'') END LIKE ? OR CASE WHEN f.manager_verified=1 THEN 'Verificado' ELSE 'Não verificado' END LIKE ? OR COALESCE(f.cancel_reason,'') LIKE ? OR EXISTS (SELECT 1 FROM formula_items fi JOIN insumos m ON m.id=fi.insumo_id WHERE fi.formula_id=f.id AND (m.name LIKE ? OR CAST(fi.quantity AS CHAR) LIKE ? OR fi.unit LIKE ?)) OR EXISTS (SELECT 1 FROM formula_budget_items bi WHERE bi.formula_id=f.id AND (bi.unit LIKE ? OR CAST(bi.quantity AS CHAR) LIKE ? OR CAST(bi.value AS CHAR) LIKE ? OR REPLACE(CAST(bi.value AS CHAR),'.',',') LIKE ?) AND bi.is_selected=1))`);
       params.push(...Array(21).fill(like));
     }
     if (!fence) {
@@ -772,7 +743,7 @@ export class Db {
       SELECT f.id, f.customer_id, c.name AS customer_name,
              r.name AS responsible_name,
              COALESCE(f.customer_phone,'') AS customer_phone,
-             COALESCE(f.attendant_name,'') AS attendant_name,
+             COALESCE(f.attendant_name,'') AS attendant_name, f.created_by_name,
              COALESCE(f.budget_number,'') AS budget_number,
              f.delivery_date, f.delivered_at, COALESCE(f.payment_status,'') AS payment_status,
              f.partial_payment_amount,
@@ -834,16 +805,20 @@ export class Db {
     return result[0] ?? null;
   }
 
-  async getFormulaSummary(month: number, year: number): Promise<FormulaSummaryDto> {
+  async getFormulaSummary(month: number, year: number, paymentStatus: SummaryPaymentStatus = 'pago'): Promise<FormulaSummaryDto> {
     const [counts] = await this.q<any[]>(`SELECT COUNT(*) AS total, SUM(status='pending') AS pending, SUM(status='confirmed') AS confirmed FROM formulas`);
-    const [monthly] = await this.q<any[]>(`SELECT COALESCE(SUM(bi.value),0) AS total FROM formulas f JOIN formula_budget_items bi ON bi.formula_id=f.id AND bi.is_selected=1 WHERE f.payment_status='pago' AND f.delivery_status='entregue' AND YEAR(f.delivered_at)=? AND MONTH(f.delivered_at)=?`, [year, month + 1]);
+    if (!Number.isInteger(month) || month < 0 || month > 11 || !Number.isInteger(year) || year < 1900 || year > 9999 || !['pago', 'parcial', 'pagar_na_retirada', 'nao_pago'].includes(paymentStatus)) throw new Error('Filtro de resumo inválido.');
+    const [monthly] = await this.q<any[]>(`SELECT COALESCE(SUM(CASE WHEN ?='parcial' THEN COALESCE(f.partial_payment_amount,0)
+      ELSE (SELECT COALESCE(SUM(bi.value),0) FROM formula_budget_items bi WHERE bi.formula_id=f.id AND bi.is_selected=1) END),0) AS total
+      FROM formulas f WHERE (f.payment_status=? OR (?='nao_pago' AND COALESCE(f.payment_status,'')=''))
+      AND f.delivery_status='entregue' AND YEAR(f.delivered_at)=? AND MONTH(f.delivered_at)=?`, [paymentStatus, paymentStatus, paymentStatus, year, month + 1]);
     const years = await this.q<any[]>(`SELECT DISTINCT YEAR(delivered_at) AS year FROM formulas WHERE delivered_at IS NOT NULL ORDER BY year DESC`);
     return { total: Number(counts?.total ?? 0), pending: Number(counts?.pending ?? 0), confirmed: Number(counts?.confirmed ?? 0), deliveredMonthlyTotal: Number(monthly?.total ?? 0), deliveredYears: years.map((row: any) => Number(row.year)).filter((value: number) => value > 1900) };
   }
 
   private async loadFormulaRows(ids: number[]) {
     const placeholders = ids.map(() => '?').join(',');
-    const formulas = await this.q<any[]>(`SELECT f.id, f.customer_id, c.name AS customer_name, r.name AS responsible_name, COALESCE(f.customer_phone,'') AS customer_phone, COALESCE(f.attendant_name,'') AS attendant_name, COALESCE(f.budget_number,'') AS budget_number, f.delivery_date, f.delivered_at, COALESCE(f.payment_status,'') AS payment_status, f.partial_payment_amount, f.payment_method, COALESCE(f.delivery_status,'') AS delivery_status, f.manager_verified, f.cancel_reason, f.status, f.created_at FROM formulas f JOIN customers c ON f.customer_id=c.id LEFT JOIN customers r ON r.id=c.responsible_id WHERE f.id IN (${placeholders})`, ids);
+    const formulas = await this.q<any[]>(`SELECT f.id, f.customer_id, c.name AS customer_name, r.name AS responsible_name, COALESCE(f.customer_phone,'') AS customer_phone, COALESCE(f.attendant_name,'') AS attendant_name, f.created_by_name, COALESCE(f.budget_number,'') AS budget_number, f.delivery_date, f.delivered_at, COALESCE(f.payment_status,'') AS payment_status, f.partial_payment_amount, f.payment_method, COALESCE(f.delivery_status,'') AS delivery_status, f.manager_verified, f.cancel_reason, f.status, f.created_at FROM formulas f JOIN customers c ON f.customer_id=c.id LEFT JOIN customers r ON r.id=c.responsible_id WHERE f.id IN (${placeholders})`, ids);
     const [items, budgetItems] = await Promise.all([
       this.q<any[]>(`SELECT fi.formula_id, fi.insumo_id, m.name AS insumo_name, fi.quantity, fi.unit FROM formula_items fi JOIN insumos m ON m.id=fi.insumo_id WHERE fi.formula_id IN (${placeholders})`, ids),
       this.q<any[]>(`SELECT formula_id, quantity, unit, value, is_selected FROM formula_budget_items WHERE formula_id IN (${placeholders})`, ids),
@@ -870,11 +845,10 @@ export class Db {
     status?: string;
   }, sessionToken?: string) {
     this.assertOperationContext();
+    const creator = contexts.getStore()?.user;
+    if (contexts.getStore()?.kind !== 'session' || !creator) throw new Error('Sessão obrigatória para criar a fórmula.');
     if (!this.pool) throw new Error('Sem conexão com o servidor');
     const deliveryStatus = formula.status === 'confirmed' ? 'em_producao' : (formula.delivery_status ?? '');
-    if (deliveryStatus === 'entregue' && formula.payment_status !== 'pago') {
-      throw new Error('A fórmula só pode ser entregue quando o pagamento estiver como "Pago".');
-    }
     const { connection: conn, owned } = await this.operationConnection();
     try {
       if (owned) await conn.beginTransaction();
@@ -882,9 +856,9 @@ export class Db {
         FROM customers c LEFT JOIN customers r ON r.id=c.responsible_id WHERE c.id=?`, [formula.customer_id]);
       const customerPhone = customer[0]?.phone ?? '';
 const [r]: any = await conn.query(
-        `INSERT INTO formulas (customer_id, customer_phone, attendant_name, budget_number, delivery_date, delivered_at, payment_status, partial_payment_amount, payment_method, delivery_status, cancel_reason, status)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [formula.customer_id, customerPhone, formula.attendant_name, formula.budget_number ?? '',
+        `INSERT INTO formulas (customer_id, customer_phone, attendant_name, created_by_name, budget_number, delivery_date, delivered_at, payment_status, partial_payment_amount, payment_method, delivery_status, cancel_reason, status)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [formula.customer_id, customerPhone, formula.attendant_name, creator.name, formula.budget_number ?? '',
          formula.delivery_date ?? null, deliveryStatus === 'entregue' ? getDeliveryTimestamp() : null, formula.payment_status ?? '',
          formula.payment_status === 'parcial' ? formula.partial_payment_amount ?? null : null,
          formula.payment_method ?? null, deliveryStatus,
@@ -938,9 +912,6 @@ const [r]: any = await conn.query(
     const partialPaymentAmount = paymentStatus === 'parcial'
       ? formula.partial_payment_amount ?? current[0]?.partial_payment_amount ?? null
       : null;
-    if (deliveryStatus === 'entregue' && paymentStatus !== 'pago') {
-      throw new Error('A fórmula só pode ser entregue quando o pagamento estiver como "Pago".');
-    }
     const { connection: conn, owned } = await this.operationConnection();
     try {
       if (owned) await conn.beginTransaction();
@@ -991,14 +962,6 @@ const [r]: any = await conn.query(
   }
 
   async updateFormulaDeliveryStatus(id: number, deliveryStatus: string, sessionToken?: string) {
-    if (deliveryStatus === 'entregue') {
-      const rows = await this.q<Array<{ payment_status: string }>>(
-        'SELECT payment_status FROM formulas WHERE id=?', [id]
-      );
-      if (rows[0]?.payment_status !== 'pago') {
-        throw new Error('A fórmula só pode ser entregue quando o pagamento estiver como "Pago".');
-      }
-    }
     await this.q(
       `UPDATE formulas SET ${deliveredAtUpdate}, delivery_status=?, status=CASE WHEN ?='entregue' THEN 'delivered' WHEN status='delivered' THEN 'confirmed' ELSE status END WHERE id=?`,
       [deliveryStatus, getDeliveryTimestamp(), deliveryStatus, deliveryStatus, id]
@@ -1006,6 +969,59 @@ const [r]: any = await conn.query(
     const actor = await this.resolveActor(sessionToken);
     await this.logAction(actor, 'update_delivery_status', 'formulas', id, `Andamento da fórmula ${id} alterado para ${deliveryStatus}.`);
     return { success: true };
+  }
+
+  async updateFormulaPayment(id: number, payment: FormulaPaymentUpdate, sessionToken?: string) {
+    if (!this.pool) throw new Error('Sem conexão com o servidor');
+    const actor = contexts.getStore()?.user;
+    if (contexts.getStore()?.kind !== 'session' || !actor) throw new Error('Sessão obrigatória para editar o pagamento.');
+    if (!payment || !['pago', 'parcial', 'pagar_na_retirada'].includes(payment.payment_status)) {
+      throw new BusinessRuleError('Status de pagamento inválido.');
+    }
+    const { connection: conn, owned } = await this.operationConnection();
+    try {
+      if (owned) await conn.beginTransaction();
+      const [rows] = await conn.query<mysql.RowDataPacket[]>(
+        'SELECT status, delivery_status, payment_status, partial_payment_amount FROM formulas WHERE id=? FOR UPDATE', [id]
+      );
+      const formula = rows[0];
+      if (!formula) throw new BusinessRuleError('Fórmula não encontrada.', 404);
+      if (formula.status !== 'delivered' || formula.delivery_status !== 'entregue') {
+        throw new BusinessRuleError('Somente fórmulas entregues podem ter o pagamento editado no histórico.', 409);
+      }
+      if (formula.payment_status === 'pago') {
+        throw new BusinessRuleError('O pagamento desta fórmula já está como Pago e não pode ser alterado.', 409);
+      }
+      let partialAmount: number | null = null;
+      if (payment.payment_status === 'parcial') {
+        const [budgets] = await conn.query<mysql.RowDataPacket[]>(
+          'SELECT value FROM formula_budget_items WHERE formula_id=? AND is_selected=1 FOR UPDATE', [id]
+        );
+        if (budgets.length !== 1) throw new BusinessRuleError('Selecione uma única opção de orçamento para validar o limite.');
+        const amount = payment.partial_payment_amount;
+        if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+          throw new BusinessRuleError('Informe uma quantia maior que zero.');
+        }
+        partialAmount = Math.round(amount * 100) / 100;
+        if (Math.abs(amount - partialAmount) > 1e-8 || partialAmount <= 0) {
+          throw new BusinessRuleError('Informe uma quantia válida com até duas casas decimais.');
+        }
+        if (partialAmount > Number(budgets[0].value)) {
+          throw new BusinessRuleError('A quantia paga não pode ser maior que o valor do orçamento selecionado.');
+        }
+      }
+      await conn.query('UPDATE formulas SET payment_status=?, partial_payment_amount=? WHERE id=?',
+        [payment.payment_status, partialAmount, id]);
+      if (owned) await conn.commit();
+      await this.logAction({ id: actor.id, name: actor.name }, 'update', 'formulas', id,
+        `Pagamento da fórmula ${id} alterado de ${formula.payment_status} para ${payment.payment_status}. Quantia parcial: ${formula.partial_payment_amount ?? 'não informada'} → ${partialAmount ?? 'não se aplica'}.`);
+      return { success: true };
+    } catch (e) {
+      if (owned) await conn.rollback();
+      throw e;
+    } finally {
+      if (owned) conn.release();
+    }
   }
 
   async verifyFormula(id: number, sessionToken?: string) {
@@ -1022,13 +1038,6 @@ const [r]: any = await conn.query(
 
   async updateFormulasDeliveryStatus(ids: number[], deliveryStatus: string, sessionToken?: string) {
     if (!ids.length) return { success: true };
-    if (deliveryStatus === 'entregue') {
-      const rows = await this.q<Array<{ id: number; payment_status: string }>>(
-        `SELECT id, payment_status FROM formulas WHERE id IN (${ids.map(() => '?').join(',')})`, ids
-      );
-      const unpaid = rows.filter(row => row.payment_status !== 'pago').map(row => row.id);
-      if (unpaid.length) throw new Error(`A fórmula ${unpaid.join(', ')} só pode ser entregue quando o pagamento estiver como "Pago".`);
-    }
     const actor = await this.resolveActor(sessionToken);
     const deliveredAt = getDeliveryTimestamp();
     for (const id of ids) {
@@ -1060,7 +1069,7 @@ const [r]: any = await conn.query(
   async listSavedFormulas() {
     await this.assertPrivilegedSession();
     const formulas = await this.q<any[]>(
-      'SELECT id, name, budget_number, created_at FROM saved_formulas ORDER BY name'
+      'SELECT id, name, created_by_name, budget_number, created_at FROM saved_formulas ORDER BY name'
     );
 
     if (formulas.length === 0) return formulas;
@@ -1111,11 +1120,13 @@ const [r]: any = await conn.query(
     budget_items: Array<{ quantity: number; unit: string; value: number }>;
   }, sessionToken?: string) {
     this.assertOperationContext();
+    const creator = contexts.getStore()?.user;
+    if (contexts.getStore()?.kind !== 'session' || !creator) throw new Error('Sessão obrigatória para criar a fórmula.');
     if (!this.pool) throw new Error('Sem conexão com o servidor');
     const { connection: conn, owned } = await this.operationConnection();
     try {
       if (owned) await conn.beginTransaction();
-      const [r]: any = await conn.query('INSERT INTO saved_formulas (name, budget_number) VALUES (?,?)', [formula.name, formula.budget_number ?? null]);
+      const [r]: any = await conn.query('INSERT INTO saved_formulas (name, budget_number, created_by_name) VALUES (?,?,?)', [formula.name, formula.budget_number ?? null, creator.name]);
       await this.reserveBudgetNumber(conn, formula.budget_number, 'saved_formula', r.insertId);
       for (const item of formula.items) {
         await conn.query('INSERT INTO saved_formula_items (saved_formula_id, insumo_id, quantity, unit) VALUES (?,?,?,?)',

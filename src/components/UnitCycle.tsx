@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { ChevronDown } from 'lucide-react';
+import { formatUnit } from '../utils/format';
 
 interface UnitCycleProps {
   value: string;
@@ -8,8 +9,8 @@ interface UnitCycleProps {
   disabled?: boolean;
 }
 
-export const INGREDIENT_UNITS = ['g', 'mcg', 'mg', 'ml', 'ui'];
-export const BUDGET_UNITS = ['caps', 'doses', 'g', 'ml'];
+export const INGREDIENT_UNITS = ['g', 'mcg', 'mg', 'ml', 'ui', '%'];
+export const BUDGET_UNITS = ['caps', 'caps s.l.', 'doses', 'g', 'ml', 'sachê', '%'];
 
 export function UnitCycle({ value, onChange, options, disabled }: UnitCycleProps) {
   const cycle = useCallback((dir: number) => {
@@ -37,7 +38,7 @@ export function UnitCycle({ value, onChange, options, disabled }: UnitCycleProps
           if (e.key === 'ArrowDown') { e.preventDefault(); cycle(1); }
           else if (e.key === 'ArrowUp') { e.preventDefault(); cycle(-1); }
         }}>
-        {options.map(u => <option key={u} value={u}>{u}</option>)}
+        {options.map(u => <option key={u} value={u}>{formatUnit(u)}</option>)}
       </select>
       <ChevronDown size={16} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
     </div>

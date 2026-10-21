@@ -1,4 +1,5 @@
 import https from 'node:https';
+import { loginSession, sessionHeaders } from './web-session.mjs';
 import http from 'node:http';
 import crypto from 'node:crypto';
 
@@ -12,9 +13,9 @@ const hostB = 'qa-b.invalid';
 const port = 28443;
 const password = (tenant) => `Etapa11QA_${tenant}_Synthet1c_${crypto.createHash('sha256').update(`STAGE11_QA_${tenant.toUpperCase()}`).digest('hex').slice(0, 8)}`;
 const fail = (message) => { throw new Error(message); };
-function httpsRequest(host, pathname, { method = 'GET', token, body, overrideHost } = {}) {
+function httpsRequest(host, pathname, { method = 'GET', session, body, overrideHost } = {}) {
   return new Promise((resolve, reject) => {
-    const req = https.request({ hostname: host, port, method, path: pathname, agent: tlsAgent, headers: { host: overrideHost ?? host, ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { 'content-type': 'application/json' } : {}) } }, (res) => {
+    const req = https.request({ hostname: host, port, method, path: pathname, agent: tlsAgent, headers: { host: overrideHost ?? host, ...sessionHeaders(host, port, session), ...(body ? { 'content-type': 'application/json' } : {}) } }, (res) => {
       let data = ''; res.setEncoding('utf8'); res.on('data', (chunk) => { data += chunk; }); res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, text: data, json: (() => { try { return JSON.parse(data); } catch { return null; } })() }));
     });
     req.on('error', reject); if (body) req.write(JSON.stringify(body)); req.end();
@@ -26,7 +27,7 @@ async function expectStatus(name, actual, expected, evidence) {
 }
 async function login(host, tenant, force = false) {
   const username = `s11load${tenant}01`;
-  return httpsRequest(host, '/api/v1/auth/desktop/login', { method: 'POST', body: { username, password: password(tenant), ...(force ? { force: true } : {}) } });
+  return loginSession(httpsRequest, host, username, password(tenant), force);
 }
 
 try {
@@ -47,24 +48,24 @@ try {
   await expectStatus('consulta sem sessão', anonymous.status, 401);
   const first = await login(hostA, 'a', true);
   await expectStatus('login inicial A', first.status, 200);
-  const firstToken = first.json?.data?.token;
-  if (!firstToken) fail('Login A não entregou token de sessão.');
+  const firstToken = first.session;
+  if (!firstToken) fail('Login A não entregou cookie de sessão.');
   const conflict = await login(hostA, 'a');
   await expectStatus('conflito de sessão única A', conflict.status, 409);
   const forced = await login(hostA, 'a', true);
   await expectStatus('login forçado A', forced.status, 200);
-  const newToken = forced.json?.data?.token;
-  if (!newToken) fail('Login forçado A não entregou token.');
-  const revoked = await httpsRequest(hostA, '/api/v1/customers', { token: firstToken });
-  await expectStatus('token anterior após force', revoked.status, 401);
-  const ownA = await httpsRequest(hostA, '/api/v1/formulas', { token: newToken });
+  const newToken = forced.session;
+  if (!newToken) fail('Login forçado A não entregou cookie.');
+  const revoked = await httpsRequest(hostA, '/api/v1/customers', { session: firstToken });
+  await expectStatus('cookie anterior após force', revoked.status, 401);
+  const ownA = await httpsRequest(hostA, '/api/v1/formulas?limit=50', { session: newToken });
   await expectStatus('listagem de dados A', ownA.status, 200, ownA.text.includes('Atendente QA A') ? 'marcador A presente' : 'sem marcador A');
   if (!ownA.text.includes('Atendente QA A')) fail('A não retornou marcador de fórmula A.');
-  const cross = await httpsRequest(hostB, '/api/v1/customers', { token: newToken });
-  await expectStatus('token A usado contra B', cross.status, 401);
+  const cross = await httpsRequest(hostB, '/api/v1/customers', { session: newToken });
+  await expectStatus('cookie A usado contra B', cross.status, 401);
   const second = await login(hostB, 'b', true);
   await expectStatus('login B', second.status, 200);
-  const ownB = await httpsRequest(hostB, '/api/v1/formulas', { token: second.json?.data?.token });
+  const ownB = await httpsRequest(hostB, '/api/v1/formulas?limit=50', { session: second.session });
   await expectStatus('listagem de dados B', ownB.status, 200, ownB.text.includes('Atendente QA B') ? 'marcador B presente' : 'sem marcador B');
   if (!ownB.text.includes('Atendente QA B')) fail('B não retornou marcador de fórmula B.');
   const mismatch = await httpsRequest(hostA, '/api/v1/health/ready', { overrideHost: 'intruso.invalid' });

@@ -19,7 +19,7 @@ beforeAll(async () => {
   await connection.query("CREATE TABLE sessions (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL UNIQUE, token VARCHAR(64) NOT NULL UNIQUE, policy ENUM('desktop_local','hosted') NOT NULL DEFAULT 'desktop_local', last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, expires_at DATETIME NULL, absolute_expires_at DATETIME NULL, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE) ENGINE=InnoDB");
   await connection.query('CREATE TABLE customers (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, phone VARCHAR(30) NULL, responsible_id INT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT fk_customer_responsible FOREIGN KEY (responsible_id) REFERENCES customers(id)) ENGINE=InnoDB');
   await connection.query('CREATE TABLE action_logs (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NULL, user_name VARCHAR(255) NOT NULL, action VARCHAR(100) NOT NULL, entity VARCHAR(100) NOT NULL, entity_id INT NULL, details TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB');
-  await connection.query('CREATE TABLE formulas (id INT AUTO_INCREMENT PRIMARY KEY, customer_id INT NOT NULL, customer_phone VARCHAR(30) NOT NULL DEFAULT "", attendant_name VARCHAR(255) NOT NULL, budget_number VARCHAR(20) NOT NULL DEFAULT "", delivery_date DATE NULL, delivered_at DATETIME NULL, payment_status VARCHAR(30) NOT NULL DEFAULT "", partial_payment_amount DECIMAL(10,2) NULL, payment_method VARCHAR(40) NULL, delivery_status VARCHAR(40) NOT NULL DEFAULT "", cancel_reason TEXT NULL, status VARCHAR(40) NOT NULL DEFAULT "pending", manager_verified TINYINT NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT fk_formula_customer FOREIGN KEY (customer_id) REFERENCES customers(id)) ENGINE=InnoDB');
+  await connection.query('CREATE TABLE formulas (id INT AUTO_INCREMENT PRIMARY KEY, customer_id INT NOT NULL, customer_phone VARCHAR(30) NOT NULL DEFAULT "", attendant_name VARCHAR(255) NOT NULL, created_by_name VARCHAR(255) NULL, budget_number VARCHAR(20) NOT NULL DEFAULT "", delivery_date DATE NULL, delivered_at DATETIME NULL, payment_status VARCHAR(30) NOT NULL DEFAULT "", partial_payment_amount DECIMAL(10,2) NULL, payment_method VARCHAR(40) NULL, delivery_status VARCHAR(40) NOT NULL DEFAULT "", cancel_reason TEXT NULL, status VARCHAR(40) NOT NULL DEFAULT "pending", manager_verified TINYINT NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT fk_formula_customer FOREIGN KEY (customer_id) REFERENCES customers(id)) ENGINE=InnoDB');
   await connection.query('CREATE TABLE budget_number_registry (budget_number VARCHAR(20) PRIMARY KEY, source_type VARCHAR(30) NOT NULL, source_id INT NOT NULL) ENGINE=InnoDB');
   await connection.query('CREATE TABLE formula_items (id INT AUTO_INCREMENT PRIMARY KEY, formula_id INT NOT NULL, insumo_id INT NOT NULL, quantity DECIMAL(10,3) NOT NULL, unit VARCHAR(40) NOT NULL, CONSTRAINT fk_fixture_formula_item_formula FOREIGN KEY (formula_id) REFERENCES formulas(id) ON DELETE CASCADE) ENGINE=InnoDB');
   await connection.query('CREATE TABLE formula_budget_items (id INT AUTO_INCREMENT PRIMARY KEY, formula_id INT NOT NULL, quantity INT NOT NULL, unit VARCHAR(40) NOT NULL, value DECIMAL(10,2) NOT NULL, is_selected TINYINT NOT NULL DEFAULT 0, CONSTRAINT fk_fixture_budget_item_formula FOREIGN KEY (formula_id) REFERENCES formulas(id) ON DELETE CASCADE) ENGINE=InnoDB');
@@ -64,9 +64,11 @@ describe.skipIf(!process.env.MARIADB_HOST)('harness MariaDB isolado', () => {
     try {
       const [customer] = await connection.execute<mysql.ResultSetHeader>('INSERT INTO customers (name, phone) VALUES (?, ?)', [fixtureCustomer.name, fixtureCustomer.phone]);
       const formula = { customer_id: customer.insertId, attendant_name: fixtureUser.name, items: [{ insumo_id: 70001, quantity: 1, unit: 'mg' }], budget_number: fixtureFormula.budget_number, budget_items: [{ quantity: 30, unit: 'caps', value: 12.5, is_selected: 1 }], payment_status: 'pendente', status: 'pending' };
-      const first = await db.addFormula(formula);
+      await connection.execute('INSERT INTO users(name,username,password,role) VALUES(?,?,?,?)', ['Criador rollback','rollback-qa',crypto.createHash('sha256').update('qa').digest('hex'),'employee']);
+      const login = await db.login('rollback-qa','qa');
+      const first = await db.withSessionContext(login.sessionToken, () => db.addFormula(formula));
       expect(first.success).toBe(true);
-      await expect(db.addFormula(formula)).rejects.toThrow('Número de orçamento já utilizado.');
+      await expect(db.withSessionContext(login.sessionToken, () => db.addFormula(formula))).rejects.toThrow('Número de orçamento já utilizado.');
       const [rows] = await connection.execute<mysql.RowDataPacket[]>('SELECT id FROM formulas');
       const [items] = await connection.execute<mysql.RowDataPacket[]>('SELECT formula_id FROM formula_items');
       expect(rows).toHaveLength(1);
@@ -76,18 +78,19 @@ describe.skipIf(!process.env.MARIADB_HOST)('harness MariaDB isolado', () => {
     }
   });
 
-  it('impede entrega sem pagamento, limpa ao sair de entregue e data ao entregar novamente', async () => {
+  it('permite entrega parcial, preserva a data em repeticao e limpa ao reabrir', async () => {
     const db = new Db();
     const pool = mysql.createPool({ ...config, dateStrings: true, timezone: '-03:00' });
     db.setPool(pool);
     try {
       const [customer] = await connection.execute<mysql.ResultSetHeader>('INSERT INTO customers (name, phone) VALUES (?, ?)', [fixtureCustomer.name, fixtureCustomer.phone]);
       const [formula] = await connection.execute<mysql.ResultSetHeader>('INSERT INTO formulas (customer_id, attendant_name, payment_status) VALUES (?, ?, ?)', [customer.insertId, fixtureUser.name, 'parcial']);
-      await expect(db.updateFormulaDeliveryStatus(formula.insertId, 'entregue')).rejects.toThrow('A fórmula só pode ser entregue quando o pagamento estiver como "Pago".');
-      await connection.execute('UPDATE formulas SET payment_status = ? WHERE id = ?', ['pago', formula.insertId]);
+      await db.updateFormulaDeliveryStatus(formula.insertId, 'entregue');
+      const [initial] = await pool.execute<mysql.RowDataPacket[]>('SELECT delivered_at FROM formulas WHERE id=?', [formula.insertId]);
       await db.updateFormulaDeliveryStatus(formula.insertId, 'entregue');
       const [first] = await pool.execute<mysql.RowDataPacket[]>('SELECT delivered_at, delivery_status FROM formulas WHERE id = ?', [formula.insertId]);
       expect(first[0].delivery_status).toBe('entregue');
+      expect(first[0].delivered_at).toBe(initial[0].delivered_at);
       expect(first[0].delivered_at).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
       await db.updateFormulaDeliveryStatus(formula.insertId, 'em_reentrega');
       const [reopened] = await pool.execute<mysql.RowDataPacket[]>('SELECT delivered_at FROM formulas WHERE id = ?', [formula.insertId]);
@@ -128,21 +131,21 @@ describe.skipIf(!process.env.MARIADB_HOST)('autenticação e autorização comun
     await connection.execute('DELETE FROM customers WHERE id=?', [customer.insertId]);
   });
 
-  it('faz rehash SHA-256 para Argon2id no login e cria política desktop', async () => {
+  it('faz rehash SHA-256 para Argon2id no login e cria política hospedada', async () => {
     const id = await user('rehash-qa');
     const result = await db.login('rehash-qa', 'senha-qa');
     expect(result.success).toBe(true);
     const [rows] = await connection.execute<mysql.RowDataPacket[]>('SELECT password FROM users WHERE id=?', [id]);
     expect(rows[0].password).toMatch(/^\$argon2id\$/);
     const [sessions] = await connection.execute<mysql.RowDataPacket[]>('SELECT policy, expires_at, absolute_expires_at FROM sessions WHERE user_id=?', [id]);
-    expect(sessions[0].policy).toBe('desktop_local');
+    expect(sessions[0].policy).toBe('hosted');
     expect(sessions[0].expires_at).toBeTruthy();
     expect(sessions[0].absolute_expires_at).toBeTruthy();
   });
 
   it('cria política hospedada com janela ociosa e duração absoluta próprias', async () => {
     const id = await user('hosted-qa');
-    const result = await db.login('hosted-qa', 'senha-qa', false, 'hosted');
+    const result = await db.login('hosted-qa', 'senha-qa');
     expect(result.success).toBe(true);
     const [rows] = await connection.execute<mysql.RowDataPacket[]>(`SELECT policy,
       TIMESTAMPDIFF(SECOND,NOW(),expires_at) AS idle_seconds,
@@ -150,6 +153,19 @@ describe.skipIf(!process.env.MARIADB_HOST)('autenticação e autorização comun
     expect(rows[0].policy).toBe('hosted');
     expect(Number(rows[0].idle_seconds)).toBeGreaterThan(890);
     expect(Number(rows[0].absolute_seconds)).toBeGreaterThan(43190);
+  });
+
+  it('rejeita e limpa sessões legadas sem alterar o schema', async () => {
+    const id = await user('legacy-session-qa');
+    const login = await db.login('legacy-session-qa', 'senha-qa');
+    expect(login.success).toBe(true);
+    await connection.execute("UPDATE sessions SET policy='desktop_local' WHERE user_id=?", [id]);
+    expect((await db.getSessionUser(login.sessionToken!)).user).toBeUndefined();
+    expect((await db.heartbeat(login.sessionToken!)).valid).toBe(false);
+    await db.cleanupStaleSessions();
+    const [rows] = await connection.execute<mysql.RowDataPacket[]>('SELECT id FROM sessions WHERE user_id=?', [id]);
+    expect(rows).toHaveLength(0);
+    expect((await db.login('legacy-session-qa', 'senha-qa')).success).toBe(true);
   });
 
   it('impede rebaixar o último acesso administrativo', async () => {

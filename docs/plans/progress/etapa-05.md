@@ -1,3 +1,5 @@
+> Registro histórico: a arquitetura desktop descrita neste documento foi superada pela aplicação exclusivamente web. Consulte `docs/architecture.md` para o fluxo vigente. Resultados de QA históricos não validam a versão atual.
+
 # Etapa 05 — Autenticação, autorização e auditoria comuns
 
 **Estado:** implementação e testes automatizados concluídos para o núcleo e Electron local. Gate de implantação em clientes permanece pendente: o artefato foi empacotado para validação, não instalado nem distribuído.

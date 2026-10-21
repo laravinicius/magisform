@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { HistoryPaymentModal } from './HistoryPaymentModal';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { RefreshCw, Search, X, ChevronRight } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db } from '../services/lanDatabase';
 import { platform } from '../services/platformFacade';
-import { Formula } from '../types';
-import { formatDateToBR, formatQuantity } from '../utils/format';
+import { Formula, SummaryPaymentStatus } from '../types';
+import { formatDateToBR, formatQuantity, formatUnit } from '../utils/format';
 import { useData } from '../hooks/useData';
 import { useAuth } from '../context/AuthContext';
 import { LoadingState, ErrorState } from './Feedback';
@@ -38,18 +39,19 @@ export function getMissingReasons(f: Formula): string[] {
   if (!f.budget_number) reasons.push('Número do orçamento');
   if (!f.budget_items || f.budget_items.length === 0) reasons.push('Itens do orçamento');
   if (!f.attendant_name) reasons.push('Atendente PM');
-  if (!f.delivery_date || !/^\d{4}-\d{2}-\d{2}$/.test(f.delivery_date)) reasons.push('Data de entrega válida');
+  if (!f.delivery_date || !/^\d{4}-\d{2}-\d{2}$/.test(f.delivery_date)) reasons.push('Previsão de entrega válida');
   if (!f.payment_status) reasons.push('Status de pagamento');
   const budgetItems = f.budget_items ?? [];
   if (budgetItems.length > 1 && budgetItems.filter(bi => bi.is_selected).length !== 1) reasons.push('Selecionar um único orçamento');
   return reasons;
 }
 
-export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'pending', employeeName, statusFilterOptions, showAndamento = true, showVerification = false, monthlySummary = false, deliveryStatusFilter, onSelect, onConfirm, onDeliveryBlocked, onRepeat }: { screenKey: string; title: string; subtitle: string; statuses: string[]; variant?: 'pending' | 'confirmed'; employeeName?: string; statusFilterOptions?: { value: string; label: string }[]; showAndamento?: boolean; showVerification?: boolean; monthlySummary?: boolean; deliveryStatusFilter?: string; onSelect?: (f: Formula) => void; onConfirm?: (f: Formula, missing: string[]) => void; onDeliveryBlocked?: (f: Formula, missing: string[]) => void; onRepeat?: (f: Formula) => void }) {
+export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'pending', statusFilterOptions, showAndamento = true, showVerification = false, monthlySummary = false, deliveryStatusFilter, onSelect, onConfirm, onRepeat }: { screenKey: string; title: string; subtitle: string; statuses: string[]; variant?: 'pending' | 'confirmed'; statusFilterOptions?: { value: string; label: string }[]; showAndamento?: boolean; showVerification?: boolean; monthlySummary?: boolean; deliveryStatusFilter?: string; onSelect?: (f: Formula) => void; onConfirm?: (f: Formula, missing: string[]) => void; onRepeat?: (f: Formula) => void }) {
   const [cursorStack, setCursorStack] = useState<(string | null)[]>([null]);
   const [pageNumber, setPageNumber] = useState(1);
-  const { sessionToken, user } = useAuth();
+  const { user } = useAuth();
   const canVerify = showVerification && user?.role === 'manager';
+  const isHistory = screenKey === 'history';
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [focusedIdx, setFocusedIdx] = useState(-1);
@@ -58,16 +60,18 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
   const [pendingDeliveryConfirmation, setPendingDeliveryConfirmation] = useState<{ formula: Formula; deliveryStatus: 'aguardando_retirada' | 'entregue' } | null>(null);
   const [updatingDeliveryId, setUpdatingDeliveryId] = useState<number | null>(null);
   const [verifyingId, setVerifyingId] = useState<number | null>(null);
+  const [editingPayment, setEditingPayment] = useState<Formula | null>(null);
   const now = new Date();
   const [summaryMonth, setSummaryMonth] = useState(now.getMonth());
   const [summaryYear, setSummaryYear] = useState(now.getFullYear());
+  const [summaryPaymentStatus, setSummaryPaymentStatus] = useState<SummaryPaymentStatus>('pago');
 
   const handleConfirm = async (f: Formula) => {
     const reasons = getMissingReasons(f);
     if (reasons.length === 0) {
       setConfirmingId(f.id);
       try {
-        await db.formulas.updateStatus(f.id, 'confirmed', sessionToken ?? undefined);
+        await db.formulas.updateStatus(f.id, 'confirmed');
         await reload();
         onConfirm?.(f, []);
       } catch (err: any) {
@@ -83,7 +87,7 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
   const applyDeliveryStatus = async (formula: Formula, deliveryStatus: string) => {
     setUpdatingDeliveryId(formula.id);
     try {
-      await db.formulas.updateDeliveryStatus(formula.id, deliveryStatus, sessionToken ?? undefined);
+      await db.formulas.updateDeliveryStatus(formula.id, deliveryStatus);
       await reload();
     } catch (err: any) {
       alert('Erro ao atualizar o andamento: ' + (err?.message ?? 'verifique a conexão com o servidor.'));
@@ -93,10 +97,10 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
   };
 
   const verifyFormula = async (formula: Formula) => {
-    if (!sessionToken || formula.manager_verified || verifyingId === formula.id) return;
+    if (formula.manager_verified || verifyingId === formula.id) return;
     setVerifyingId(formula.id);
     try {
-      await db.formulas.verify(formula.id, sessionToken);
+      await db.formulas.verify(formula.id);
       await reload();
     } catch (err: any) {
       alert('Erro ao verificar fórmula: ' + (err?.message ?? 'verifique a conexão com o servidor.'));
@@ -111,10 +115,6 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
       return;
     }
     if (deliveryStatusFilter !== 'aguardando_retirada') return;
-    if (formula.payment_status !== 'pago') {
-      onDeliveryBlocked?.(formula, ['Status de pagamento: Pago']);
-      return;
-    }
     setPendingDeliveryConfirmation({ formula, deliveryStatus: 'entregue' });
   };
 
@@ -173,10 +173,10 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
       (formula.customer_phone ?? '').replace(/\D/g, ''),
       formula.budget_number,
       formula.attendant_name,
-      employeeName,
+      formula.created_by_name,
       new Date(formula.created_at).toLocaleDateString('pt-BR'),
-      formula.delivery_date ? formatDateToBR(formula.delivery_date) : '',
-      formula.delivery_date ?? '',
+      formula.delivered_at ? formatDateToBR(formula.delivered_at.slice(0, 10)) : '',
+      formula.delivered_at?.slice(0, 10) ?? '',
       paymentLabels[formula.payment_status ?? ''] ?? formula.payment_status,
       statusLabels[formula.status] ?? formula.status,
       formula.manager_verified ? 'Verificado' : 'Verificar Não verificado',
@@ -185,8 +185,8 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
         formatQuantity(item.quantity),
         item.quantity,
         item.unit,
-        item.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-        item.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        Number(item.value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        Number(item.value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
       ]),
     ];
 
@@ -194,7 +194,7 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
       || (normalizedSearch.length > 0 && (formula.customer_phone ?? '').replace(/\D/g, '').includes(normalizedSearch));
   };
 
-  const { data: formulaSummary } = useData(`formula-summary:${summaryMonth}:${summaryYear}`, () => db.formulas.summary(summaryMonth, summaryYear), [summaryMonth, summaryYear]);
+  const { data: formulaSummary, reload: reloadSummary } = useData(`formula-summary:${summaryMonth}:${summaryYear}:${summaryPaymentStatus}`, activity => db.formulas.summary(summaryMonth, summaryYear, summaryPaymentStatus, activity), [summaryMonth, summaryYear, summaryPaymentStatus]);
   const summaryYears = [...new Set([new Date().getFullYear(), ...(formulaSummary?.deliveredYears ?? [])])].sort((a, b) => b - a);
   const monthlyTotal = formulaSummary?.deliveredMonthlyTotal ?? 0;
   const filtered = all;
@@ -225,10 +225,11 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
     : deliveryStatusFilter === 'aguardando_retirada'
       ? 'Entregue'
       : null;
+  const confirmedGridCols = canVerify
+    ? 'minmax(0,2fr) repeat(4,minmax(0,1fr)) repeat(2,minmax(0,1.2fr)) minmax(6rem,1.2fr) minmax(6rem,1fr) minmax(0,1.2fr) minmax(0,1.25fr) minmax(0,1.6fr) minmax(0,2.5fr)'
+    : 'minmax(0,2fr) repeat(4,minmax(0,1fr)) repeat(2,minmax(0,1.2fr)) minmax(6rem,1.2fr) minmax(6rem,1fr) minmax(0,1.2fr) minmax(0,1.6fr) minmax(0,2.5fr)';
   const gridCols = variant === 'confirmed'
-      ? canVerify
-        ? 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.25fr)_minmax(0,1.6fr)_minmax(0,2.5fr)]'
-        : 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.6fr)_minmax(0,2.5fr)]'
+      ? isHistory ? '' : 'md:[grid-template-columns:var(--formula-columns)]'
     : showAndamento
       ? 'md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.6fr)]'
       : showRepeat
@@ -239,13 +240,15 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
 
   return (
     <>
-    <motion.div key={screenKey} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <motion.div key={screenKey} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+      style={{ '--formula-columns': confirmedGridCols } as CSSProperties}
+      className={`space-y-6 ${isHistory ? 'formula-history' : ''}`}>
+      <div className="formula-list-toolbar flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="ui-page-title text-2xl font-medium text-ink">{title}</h2>
           <p className="text-muted text-sm">{subtitle}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="formula-list-tools flex flex-wrap items-center gap-3">
           <button onClick={reload} className="ui-button ui-icon-button p-2 text-muted hover:text-ink transition-colors" title="Atualizar"><RefreshCw className="w-5 h-5" /></button>
           {statusFilterOptions && (
             <select className="ui-field px-3 py-2 bg-surface border border-control-line rounded-xl focus:ring-2 focus:ring-brand outline-none text-sm"
@@ -254,7 +257,7 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
               {statusFilterOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           )}
-          <div className="relative">
+          <div className="formula-list-search relative">
             <Search className="absolute left-3 top-2.5 w-4 h-4 text-muted" />
             <input aria-label="Buscar fórmulas" placeholder="Buscar cliente, orçamento ou atendente" className="ui-field pl-9 pr-9 py-2 bg-surface border border-control-line rounded-xl focus:ring-2 focus:ring-brand outline-none text-sm min-w-[260px]"
               value={search} onChange={e => { setSearch(e.target.value); setCursorStack([null]); setPageNumber(1); }} />
@@ -269,13 +272,19 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
       </div>
 
       {monthlySummary && (
-        <div className="flex flex-col md:flex-row md:items-center gap-3 px-4 py-3 text-ink">
-          <span className="font-semibold">Valor total de fórmulas no mês</span>
-          <select aria-label="Mês do resumo" value={summaryMonth} onChange={e => setSummaryMonth(Number(e.target.value))} className="ui-field rounded-lg border border-control-line bg-surface px-3 py-1.5 text-sm outline-none">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3 text-ink">
+          <label htmlFor="summary-payment-status" className="font-semibold">Valor total de fórmulas</label>
+          <select id="summary-payment-status" value={summaryPaymentStatus} onChange={e => setSummaryPaymentStatus(e.target.value as SummaryPaymentStatus)} className="ui-field rounded-lg border border-control-line bg-surface px-3 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-brand">
+            <option value="pago">pagas</option>
+            <option value="nao_pago">não pagas</option>
+            <option value="pagar_na_retirada">na retirada</option>
+            <option value="parcial">parciais</option>
+          </select>
+          <label htmlFor="summary-month" className="font-semibold">no Mês</label>
+          <select id="summary-month" aria-label="Mês do resumo" value={summaryMonth} onChange={e => setSummaryMonth(Number(e.target.value))} className="ui-field rounded-lg border border-control-line bg-surface px-3 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-brand">
             {['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'].map((month, index) => <option key={month} value={index}>{month}</option>)}
           </select>
-          <span className="font-semibold">/</span>
-          <select aria-label="Ano do resumo" value={summaryYear} onChange={e => setSummaryYear(Number(e.target.value))} className="ui-field rounded-lg border border-control-line bg-surface px-3 py-1.5 text-sm outline-none">
+          <select aria-label="Ano do resumo" value={summaryYear} onChange={e => setSummaryYear(Number(e.target.value))} className="ui-field rounded-lg border border-control-line bg-surface px-3 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-brand">
             {summaryYears.map(year => <option key={year} value={year}>{year}</option>)}
           </select>
           <span className="font-bold md:ml-1">{monthlyTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
@@ -286,11 +295,11 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
       {error && <ErrorState message={error} onRetry={reload} />}
       {!loading && !error && (
         <div className="ui-formula-scroll">
-        <div className={`space-y-3 ${filtered.length ? (variant === 'confirmed' ? 'ui-formula-grid' : 'ui-formula-grid-pending') : ''}`}>
+        <div className={`space-y-3 ${filtered.length && !isHistory ? (variant === 'confirmed' ? 'ui-formula-grid' : 'ui-formula-grid-pending') : ''}`}>
           {filtered.length > 0 && variant === 'confirmed' && (
-            <div className={`hidden md:grid ${gridCols} ${columnGap} mx-px px-4 text-[11px] font-semibold uppercase tracking-wide text-muted [&>span]:min-w-0`}>
+            <div className={`${isHistory ? 'formula-history-header' : 'hidden md:grid'} ${gridCols} ${columnGap} mx-px px-4 text-[11px] font-semibold uppercase tracking-wide text-muted [&>span]:min-w-0`}>
               <span className="text-left">Cliente</span><span className="text-right">Orçamento</span><span className="text-right">Quantidade</span><span className="text-right">Valor</span><span className="text-right">Restante</span><span className="text-left">Atendente</span><span className="text-left">Funcionário</span>
-              <span className="text-left">Data criação</span><span className="text-left">Data entrega</span><span className="text-left">Pagamento</span>{canVerify && <span className="text-left">Verificação</span>}<span className="text-right">Whatsapp</span><span />
+              <span className="text-left">Data criação</span><span className="text-left">{screenKey === 'history' ? 'Data de entrega' : 'Previsão de entrega'}</span><span className="text-left">Pagamento</span>{canVerify && <span className="text-left">Verificação</span>}<span className="text-right">Whatsapp</span><span />
             </div>
           )}
           {filtered.length > 0 && variant === 'pending' && (
@@ -309,6 +318,7 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
                   tabIndex={0}
                   role="button"
                   onKeyDown={e => {
+                    if (e.target !== e.currentTarget) return;
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       onSelect?.(f);
@@ -322,42 +332,46 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
                   }}
                   onFocus={() => setFocusedIdx(idx)}
                   onBlur={() => setFocusedIdx(-1)}
-                  className={`ui-panel w-full text-left rounded-2xl border  px-4 py-4 hover:border-sage-line transition-all group cursor-pointer ${cardTint} focus-visible:outline-brand focus-visible:outline-2 focus-visible:outline-offset-2`}>
-                  <div className={`grid grid-cols-1 ${gridCols} ${columnGap} items-center text-sm [&>*]:min-w-0`}>
-                    <div className="min-w-0 text-left">
+                  className={`w-full min-w-0 text-left rounded-2xl border shadow-sm px-4 py-4 hover:shadow-md transition-all group cursor-pointer ${cardTint} focus:outline-none`}>
+                  <div className={`grid grid-cols-1 ${gridCols} ${columnGap} items-center text-sm [&>*]:min-w-0 ${isHistory ? 'formula-history-row' : ''}`}>
+                    <div data-label="Cliente" className="min-w-0 text-left">
                       <p className="font-bold text-ink truncate">{f.customer_name}</p>
                       {f.customer_phone && <p className="text-xs text-muted truncate">{f.responsible_name ? `${f.responsible_name} - ${f.customer_phone}` : f.customer_phone}</p>}
                     </div>
-                    <p className="text-ink truncate text-right">{f.budget_number || '—'}</p>
-                    <div className="text-ink space-y-1 font-medium text-right">
-                      {(f.budget_items ?? []).filter(bi => bi.is_selected).map((bi, idx) => <p key={idx} className="whitespace-nowrap">{formatQuantity(bi.quantity)} {bi.unit}</p>)}
+                    <p data-label="Orçamento" className="text-ink truncate text-right">{f.budget_number || '—'}</p>
+                    <div data-label="Quantidade" className="text-ink space-y-1 font-medium text-right">
+                      {(f.budget_items ?? []).filter(bi => bi.is_selected).map((bi, idx) => <p key={idx} className="whitespace-nowrap">{formatQuantity(bi.quantity)} {formatUnit(bi.unit)}</p>)}
                       {(f.budget_items ?? []).filter(bi => bi.is_selected).length === 0 && <p className="text-muted">—</p>}
                     </div>
-                    <div className="text-ink space-y-1 tabular-nums text-right">
-                      {(f.budget_items ?? []).filter(bi => bi.is_selected).map((bi, idx) => <p key={idx}>R$ {bi.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>)}
+                    <div data-label="Valor" className="text-ink space-y-1 tabular-nums text-right">
+                      {(f.budget_items ?? []).filter(bi => bi.is_selected).map((bi, idx) => <p key={idx}>R$ {Number(bi.value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>)}
                       {(f.budget_items ?? []).filter(bi => bi.is_selected).length === 0 && <p className="text-muted">—</p>}
                     </div>
-                    <p className="text-ink tabular-nums text-right whitespace-nowrap">
+                    <p data-label="Restante" className="text-ink tabular-nums text-right whitespace-nowrap">
                       {f.payment_status === 'parcial' && f.partial_payment_amount != null && (f.budget_items ?? []).some(bi => bi.is_selected)
                         ? `R$ ${Math.max(0, Number((f.budget_items ?? []).find(bi => bi.is_selected)!.value) - Number(f.partial_payment_amount)).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                         : '—'}
                     </p>
-                    <p className="text-ink truncate text-left">{f.attendant_name || '—'}</p>
-                    <p className="text-ink truncate text-left">{employeeName || '—'}</p>
-                    <p className="text-muted text-left">{new Date(f.created_at).toLocaleDateString('pt-BR')}</p>
-                    <p className="text-muted truncate text-left">{f.delivery_date ? formatDateToBR(f.delivery_date) : '—'}</p>
-                    <div className="flex justify-start" onClick={e => e.stopPropagation()}>
+                    <p data-label="Atendente" className="text-ink truncate text-left">{f.attendant_name || '—'}</p>
+                    <p data-label="Funcionário" className="text-ink truncate text-left">{f.created_by_name || 'Não identificado'}</p>
+                    <p data-label="Data criação" className="text-muted text-left">{new Date(f.created_at).toLocaleDateString('pt-BR')}</p>
+                    <p data-label={isHistory ? 'Data de entrega' : 'Previsão de entrega'} className="text-muted text-left tabular-nums">{screenKey === 'history'
+                      ? f.delivered_at ? formatDateToBR(f.delivered_at.slice(0, 10)) : 'Não registrada'
+                      : f.delivery_date ? formatDateToBR(f.delivery_date) : '—'}</p>
+                    <div data-label="Pagamento" className="flex justify-start" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
                       <button
                         type="button"
-                        disabled
+                        disabled={screenKey !== 'history' || f.payment_status === 'pago'}
                         aria-label={`Status de pagamento: ${paymentLabels[f.payment_status ?? ''] ?? 'Não informado'}`}
-                        className={`ui-button rounded-lg border px-2.5 py-1.5 text-xs font-bold whitespace-nowrap cursor-default ${paymentTint[f.payment_status ?? ''] ?? 'bg-canvas border-line'} ${paymentText[f.payment_status ?? ''] ?? 'text-muted'}`}
+                        title={screenKey === 'history' && f.payment_status !== 'pago' ? 'Editar pagamento' : undefined}
+                        onClick={() => setEditingPayment(f)}
+                        className={`ui-button rounded-lg border px-2.5 py-1.5 text-xs font-bold whitespace-nowrap cursor-pointer disabled:cursor-default enabled:hover:brightness-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand ${paymentTint[f.payment_status ?? ''] ?? 'bg-canvas border-line'} ${paymentText[f.payment_status ?? ''] ?? 'text-muted'}`}
                       >
                         {paymentLabels[f.payment_status ?? ''] ?? 'Não informado'}
                       </button>
                     </div>
                     {canVerify && (
-                      <div className="flex justify-start" onClick={e => e.stopPropagation()}>
+                      <div data-label="Verificação" className="flex justify-start" onClick={e => e.stopPropagation()}>
                         <button
                           type="button"
                           disabled={!!f.manager_verified || verifyingId === f.id}
@@ -369,7 +383,7 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
                         </button>
                       </div>
                     )}
-                    <div className="flex justify-end">
+                    <div data-label="WhatsApp" className="flex justify-end">
                       {(() => {
                         const whatsappUrl = getWhatsAppUrl(f.customer_phone);
                         return (
@@ -389,7 +403,7 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
                         );
                       })()}
                     </div>
-                    <div className="flex justify-end items-center gap-2">
+                    <div data-label="Ações" className="flex justify-end items-center gap-2">
                       {deliveryActionLabel && (
                         <button
                           type="button"
@@ -440,15 +454,15 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
                   </div>
                   <p className="text-ink truncate text-right">{f.budget_number || '—'}</p>
                   <div className="text-ink space-y-1 font-medium text-right">
-                    {(f.budget_items ?? []).filter(bi => bi.is_selected).map((bi, idx) => <p key={idx} className="whitespace-nowrap">{formatQuantity(bi.quantity)} {bi.unit}</p>)}
+                    {(f.budget_items ?? []).filter(bi => bi.is_selected).map((bi, idx) => <p key={idx} className="whitespace-nowrap">{formatQuantity(bi.quantity)} {formatUnit(bi.unit)}</p>)}
                     {(f.budget_items ?? []).filter(bi => bi.is_selected).length === 0 && <p className="text-muted">—</p>}
                   </div>
                   <div className="text-ink space-y-1 tabular-nums text-right">
-                    {(f.budget_items ?? []).filter(bi => bi.is_selected).map((bi, idx) => <p key={idx}>R$ {bi.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>)}
+                    {(f.budget_items ?? []).filter(bi => bi.is_selected).map((bi, idx) => <p key={idx}>R$ {Number(bi.value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>)}
                     {(f.budget_items ?? []).filter(bi => bi.is_selected).length === 0 && <p className="text-muted">—</p>}
                   </div>
                   <p className="text-ink truncate text-left">{f.attendant_name || '—'}</p>
-                  <p className="text-ink truncate text-left">{employeeName || '—'}</p>
+                  <p className="text-ink truncate text-left">{f.created_by_name || 'Não identificado'}</p>
                   <div className="min-w-0 text-muted text-left">
                     {f.items.slice(0, 3).map((item, idx) => <p key={idx} className="truncate">{item.insumo_name}</p>)}
                     {f.items.length > 3 && (
@@ -493,6 +507,11 @@ export function FormulaList({ screenKey, title, subtitle, statuses, variant = 'p
         </div>
       )}
     </motion.div>
+    {editingPayment && (
+      <HistoryPaymentModal formula={editingPayment}
+        onClose={() => setEditingPayment(null)}
+        onSaved={() => { setEditingPayment(null); void Promise.all([reload(), reloadSummary()]).catch(() => {}); }} />
+    )}
     <ConfirmModal
       isOpen={!!pendingDeliveryConfirmation}
       title={pendingDeliveryConfirmation?.deliveryStatus === 'entregue' ? 'Confirmar entrega' : 'Aguardando retirada'}

@@ -1,35 +1,21 @@
 # Arquitetura
 
-## Visão geral
-
-MagisForm é uma aplicação desktop Electron/React conectada online a MariaDB. Não há cache local ou sincronização offline documentada.
+MagisForm é exclusivamente web, com React, API Fastify e MariaDB.
 
 ```text
-React (src/) → lanDatabase.ts
-    ├─ Electron → preload.ts → IPC → electron/main.ts
-                              └→ core/db.ts → MariaDB
+Navegador → lanDatabase.ts → httpAdapter.ts → /api/v1 → core/db.ts → MariaDB
+Painel web → API do gerenciador → executor → Docker Compose de cada cliente
+Nginx Proxy Manager → rede edge exclusiva → app do cliente → rede data interna → MariaDB
 ```
 
-`main.ts` cria a janela, registra IPC, persiste a configuração desktop e emite `data:changed` após mutações.
+O backend serve `dist-web` e `/api/v1` na mesma origem. No desenvolvimento, Vite em 3002 encaminha a API para 3001. `npm run build` gera `dist-web`, `dist-manager` e `dist-server`.
 
-## Entry points
+O frontend não importa Node, driver MariaDB nem o núcleo de persistência. A fachada usa apenas HTTP. Mutações notificam assinantes do adapter; `useData` faz polling a cada 10 segundos e mantém recursos somente em memória, separados por origem e geração da sessão.
 
-- `src/main.tsx`: montagem React.
-- `src/App.tsx`: autenticação, navegação, modo configuração e telas.
-- `electron/main.ts`: processo principal e handlers IPC.
-- `core/`: Db, consultas/regras de persistência e helpers de erro/data, sem dependência de Electron ou browser.
-- `electron/preload.ts`: bridge com `contextIsolation` e sem `nodeIntegration`.
-- `database.sql`: schema usado pelo Docker e referência operacional.
+A autenticação usa cookie HttpOnly e CSRF. Sessões são exclusivamente hospedadas. Recursos de janela nativa, instalador, atualização desktop e configuração de banco pelo navegador foram removidos. Dados e configuração operacional ficam no servidor.
 
-`useData` compartilha carregamentos, escuta `data:changed` no Electron e faz polling a cada 10 segundos. O build/lint está em `package.json`; não há suíte de testes configurada.
+O painel e executor mantêm autenticação própria. Somente o executor acessa o socket Docker. Cada cliente tem Compose, banco, volume, segredos e redes exclusivos; o proxy não entra na rede interna do banco.
 
-## Limites
+Bootstrap e upgrade exigem comando explícito; pool, requests e inicialização não executam DDL. A remoção desktop não altera o schema nem checksums históricos.
 
-- O renderer não importa `mysql2` ou `core/`; o Electron main injeta o pool no núcleo compartilhável.
-- Novo acesso de dados no Electron atravessa `main.ts` → `preload.ts` → `lanDatabase.ts`.
-- Alterações de schema atualizam `database.sql`; as migrations existentes são históricas.
-- O nome interno e a marca do aplicativo são `MagisForm`; a configuração desktop fica em `%APPDATA%/MagisForm/config.json`, com `userData` e `sessionData` apontando para essa pasta. Logos e ícone usam a identidade vetorial de `website/assets/brand/`, copiada para `public/brand/`.
-- Mutations preservam auditoria e a notificação `data:changed`.
-- A apresentação usa tokens de `config/branding.ts`, estilos compartilhados em `src/index.css` e fontes locais. Detalhes: [identidade visual](visual-identity.md).
-
-> UNKNOWN: não foi encontrado CI/CD ou teste automatizado no repositório.
+A apresentação usa `config/branding.ts`, `src/index.css`, fontes locais e vetores aprovados. A marca pública da instalação vem de `/api/v1/public-config`.

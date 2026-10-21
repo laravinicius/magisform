@@ -1,3 +1,5 @@
+> Registro histórico: a arquitetura desktop descrita neste documento foi superada pela aplicação exclusivamente web. Consulte `docs/architecture.md` para o fluxo vigente. Resultados de QA históricos não validam a versão atual.
+
 # Etapa 10 — Infraestrutura, deploy, backup e recuperação
 
 **Escopo:** somente etapa 10 após a 09. Nenhum contrato, DNS, publicação, emissão/renovação pública de certificados ou alteração em produção foi feito. Mudanças pré-existentes das etapas 00–09 foram preservadas.

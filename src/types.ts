@@ -28,3 +28,5 @@ export const USER_ROLE_LABELS: Record<UserRole, string> = {
 };
 
 export const canManageUsers = (role: UserRole) => role !== 'employee';
+
+export type { PaymentStatus, SummaryPaymentStatus, FormulaPaymentUpdate } from '../shared/contracts';

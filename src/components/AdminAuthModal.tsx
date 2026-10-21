@@ -6,7 +6,7 @@ import { handleDialogArrowNavigation } from '../utils/enterNavigation';
 interface AdminAuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (adminCreds?: { username: string; password: string }, sessionToken?: string) => Promise<void>;
+  onConfirm: (adminCreds?: { username: string; password: string }) => Promise<void>;
   title?: string;
   message?: string;
 }

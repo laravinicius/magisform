@@ -1,5 +1,5 @@
-// Dados exclusivamente fictícios para capturar a interface. Nenhuma conexão externa.
-(() => {
+// Dados exclusivamente fictícios para capturar a interface.
+export function demoData() {
   const user = { id: 1, name: 'Equipe Demo', username: 'demonstracao', role: 'manager' };
   const customers = [
     { id: 1, name: 'Cliente Exemplo A', phone: '(41) 00000-0000' },
@@ -32,20 +32,5 @@
     makeFormula(8, 3, 'pending', '', '', 120),
     makeFormula(9, 4, 'pending', '', '', 160),
   ];
-  const noopListener = () => () => {};
-  const blocked = async () => { throw new Error('Operação bloqueada no ambiente de captura.'); };
-  const bridge = {
-    login: async () => ({ success: true, user, sessionToken: 'sessao-ficticia' }),
-    logout: async () => ({ success: true }), sessionHeartbeat: async () => ({ valid: true }),
-    listUsers: async () => [user], listCustomers: async () => structuredClone(customers),
-    listInsumos: async () => structuredClone(insumos), listFormulas: async () => structuredClone(formulas),
-    listSavedFormulas: async () => [], listLogs: async () => ({ rows: [], total: 0 }),
-    onDataChanged: noopListener, onConfirmExit: noopListener, onUpdateStatus: noopListener,
-    onWindowFullscreenChanged: noopListener, isWindowFullscreen: async () => false,
-    getAppVersion: async () => window.MAGISFORM_CAPTURE_VERSION, getUpdateStatus: async () => 'not-available',
-    checkForAppUpdates: async () => ({ success: false, supported: false }),
-  };
-  window.electronAPI = new Proxy(bridge, {
-    get: (target, key) => key in target ? target[key] : blocked,
-  });
-})();
+  return { user, customers, insumos, formulas };
+}

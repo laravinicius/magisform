@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-const root = path.resolve('dist-web');
+const root = path.resolve(process.argv[2] ?? 'dist-web');
 const files = [];
 async function visit(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -28,5 +28,5 @@ if (issues.length) {
   console.error(`Falha na auditoria do bundle web:\n${issues.join('\n')}`);
   process.exitCode = 1;
 } else {
-  console.log(`Auditoria aprovada: ${files.length} arquivos do dist-web sem runtime Node/Electron, driver MariaDB ou nomes de variáveis secretas.`);
+  console.log(`Auditoria aprovada: ${files.length} arquivos de ${path.basename(root)} sem runtime Node/Electron, driver MariaDB ou nomes de variáveis secretas.`);
 }

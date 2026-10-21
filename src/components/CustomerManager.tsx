@@ -10,11 +10,9 @@ import { LoadingState, ErrorState } from './Feedback';
 import { HighlightMatch } from './HighlightMatch';
 import { AdminAuthModal } from './AdminAuthModal';
 import { ConfirmModal } from './ConfirmModal';
-import { useAuth } from '../context/AuthContext';
 
 export function CustomerManager({ compact = false, onCreated, initialName }: { compact?: boolean; onCreated?: (c: Customer) => void; initialName?: string } = {}) {
   const { data: customers, loading, error, reload } = useData('customers', activity => db.customers.list(activity));
-  const { sessionToken } = useAuth();
   const [form, setForm] = useState({ firstName: initialName ?? '', lastName: '', phone: '' });
   const [isDependent, setIsDependent] = useState(false);
   const [responsibleCustomerId, setResponsibleCustomerId] = useState('');
@@ -74,7 +72,7 @@ export function CustomerManager({ compact = false, onCreated, initialName }: { c
     try {
       const payload = { name: `${form.firstName} ${form.lastName}`.trim(), phone: formatted, ...(isDependent ? { responsible_customer_id: Number(responsibleCustomerId) } : {}) };
       if (editingId) {
-        const res: any = await db.customers.update(editingId, payload, sessionToken ?? undefined);
+        const res: any = await db.customers.update(editingId, payload);
         if (res?.success === false) { setFormError(res.error ?? 'Erro ao salvar.'); return; }
         removeDraft(DRAFT_KEY);
         reset(); reload();
@@ -92,7 +90,7 @@ export function CustomerManager({ compact = false, onCreated, initialName }: { c
     if (pendingPayload === null) return;
     setSaving(true); setFormError(''); setSuccess(null);
     try {
-      const res: any = await db.customers.add(pendingPayload, sessionToken ?? undefined);
+      const res: any = await db.customers.add(pendingPayload);
       if (res?.success === false) {
         setFormError(res.error ?? 'Erro ao salvar.');
         setPendingPayload(null);
@@ -118,7 +116,7 @@ export function CustomerManager({ compact = false, onCreated, initialName }: { c
   const handleDeleteConfirm = async (adminCreds?: { username: string; password: string }, token?: string) => {
     if (pendingDeleteId === null) return;
     try {
-      const res: any = await db.customers.remove(pendingDeleteId, adminCreds, token ?? sessionToken ?? undefined);
+      const res: any = await db.customers.remove(pendingDeleteId, adminCreds);
       if (res?.success === false) { setFormError(res.error ?? 'Erro ao excluir.'); return; }
       reload();
       setPendingDeleteId(null);
@@ -134,7 +132,7 @@ export function CustomerManager({ compact = false, onCreated, initialName }: { c
     const formatted = formatPhone(rowDraft.phone);
     setSaving(true); setFormError('');
     try {
-      const res: any = await db.customers.update(editingRow, { name: rowDraft.name, phone: rowCustomer?.responsible_id ? '' : formatted }, sessionToken ?? undefined);
+      const res: any = await db.customers.update(editingRow, { name: rowDraft.name, phone: rowCustomer?.responsible_id ? '' : formatted });
       if (res?.success === false) { setFormError(res.error ?? 'Erro ao salvar.'); return; }
       setEditingRow(null); setRowDraft({ name: '', phone: '' });
       reload();

@@ -8,7 +8,7 @@ import { useData } from '../hooks/useData';
 export function Dashboard({ user, onNavigate }: { user: User; onNavigate: (tab: any) => void }) {
   const { data: customers } = useData('customers', activity => db.customers.list(activity));
   const { data: insumos } = useData('insumos', activity => db.insumos.list(activity));
-  const { data: formulas } = useData('formula-summary:dashboard', () => db.formulas.summary(new Date().getMonth(), new Date().getFullYear()));
+  const { data: formulas } = useData('formula-summary:dashboard', activity => db.formulas.summary(new Date().getMonth(), new Date().getFullYear(), undefined, activity));
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-8">

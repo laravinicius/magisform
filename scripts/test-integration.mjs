@@ -34,7 +34,7 @@ if (started.error || started.status !== 0) {
     }
     if (!ready) throw new Error('MariaDB QA não ficou pronto em 30 segundos.');
 
-    const result = spawnSync(process.execPath, [path.resolve('node_modules/vitest/vitest.mjs'), 'run', '--config', 'vitest.config.ts', 'tests/mariadb.integration.test.ts', 'tests/server.integration.test.ts', 'tests/tenant-isolation.integration.test.ts'], {
+    const result = spawnSync(process.execPath, [path.resolve('node_modules/vitest/vitest.mjs'), 'run', '--config', 'vitest.config.ts', 'tests/mariadb.integration.test.ts', 'tests/server.integration.test.ts', 'tests/tenant-isolation.integration.test.ts', 'tests/upstream.integration.test.ts'], {
       encoding: 'utf8', windowsHide: true,
       env: { ...process.env, MARIADB_HOST: '127.0.0.1', MARIADB_PORT: hostPort, MARIADB_USER: 'root', MARIADB_PASSWORD: password, MARIADB_DATABASE: 'magisform_contract' },
     });

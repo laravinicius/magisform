@@ -2,14 +2,11 @@
 node_modules/
 
 # Build output
-dist/
 dist-web/
 dist-server/
-dist-electron/
-release/
+dist-manager/
 .cache/
 coverage/
-build/
 
 # OS files
 .DS_Store
@@ -53,12 +50,16 @@ migrations/
 # Docker
 docker-data/
 
-# Evidências locais da atualização visual
-/output/playwright/magisform-visual/
+# Evidências locais de QA e capturas de navegador
+/output/
+.playwright-cli/
 
-docs/
-!docs/
 docs/*
+!docs/architecture.md
+!docs/modules.md
+!docs/authentication.md
+!docs/database.md
+!docs/visual-identity.md
 !docs/decisions/
 docs/decisions/*
 !docs/decisions/ADR-002-versioned-database-upgrades.md
@@ -77,13 +78,11 @@ docs/deployment/*
 !docs/deployment/tenant-installations.md
 !docs/deployment/management-console.md
 !docs/deployment/manager-installation-runbook.md
-.playwright-cli/
 
 # Configuração e segredos locais por instalação (o catálogo também é operacional local)
 deploy/tenants/*
 !deploy/tenants/.gitkeep
 manager-state/
-dist-manager/
 
 # Artefatos operacionais revisáveis das etapas de implantação
 !docs/plans/progress/etapa-10.md

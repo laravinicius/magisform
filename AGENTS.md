@@ -4,20 +4,20 @@ Use este arquivo como mapa curto de navegação. Consulte os documentos vinculad
 
 ## Projeto e navegação
 
-MagisForm é uma aplicação desktop Electron para fluxo de manipulação farmacêutica: Electron, React 19, Vite, TypeScript, Tailwind CSS v4 e MariaDB. O renderer nunca acessa MariaDB diretamente.
+MagisForm é uma aplicação web para fluxo de manipulação farmacêutica: React 19, Vite, TypeScript, Tailwind CSS v4, Fastify e MariaDB. O navegador nunca acessa MariaDB diretamente.
 
 ```text
-electron/main.ts       → janela, IPC, configuração e eventos de mudança
-electron/preload.ts    → bridge isolada do renderer
-core/db.ts             → queries MariaDB, sessões, autorização e auditoria
-src/App.tsx            → autenticação, navegação e composição
-src/components/        → telas e módulos de negócio
-src/services/lanDatabase.ts → facade tipada IPC/HTTP
+server/app.ts         → API HTTP, autenticação, validação e CSRF
+core/db.ts            → queries MariaDB, sessões, autorização e auditoria
+src/App.tsx           → autenticação, navegação e composição
+src/components/       → telas e módulos de negócio
+src/services/lanDatabase.ts → facade tipada HTTP
 src/hooks/useData.ts   → carregamento, polling e atualização
-src/context/           → sessão e rascunho de fórmula
-database.sql           → schema consolidado de instalação limpa
-database/upgrades/     → upgrades versionados aplicados somente por comando explícito
-docs/                  → mapas arquiteturais e decisões
+management/           → painel web de gerenciamento
+manager/              → API do painel e executor de provisionamento Docker
+deploy/tenant-template/ → instalação Docker isolada por cliente
+database.sql          → schema consolidado de instalação limpa
+database/upgrades/    → upgrades versionados aplicados somente por comando explícito
 ```
 
 Detalhes: [architecture.md](docs/architecture.md), [modules.md](docs/modules.md), [database.md](docs/database.md), [authentication.md](docs/authentication.md) e [decisions](docs/decisions/).
@@ -28,12 +28,9 @@ Interface e comentários novos devem permanecer em português brasileiro. Todos 
 
 ## Architecture & Data Flow (Critical)
 
-**Renderer never touches DB.** All data access requires three layers:
-1. `electron/main.ts` — IPC handlers (`ipcMain.handle`)
-2. `electron/preload.ts` — bridge exposed as `window.electronAPI`
-3. `src/services/lanDatabase.ts` — typed client (`db.*`) + `Window.electronAPI` types
+**O navegador nunca acessa o banco.** Dados seguem `lanDatabase.ts` → `httpAdapter.ts` → `server/app.ts` → `core/db.ts`. Sessão em cookie HttpOnly; mutações exigem Origin e CSRF.
 
-**Mutations** → `main.ts` emits `data:changed` to all windows; `useData` hook also polls every 10s.
+**Mutações** notificam os assinantes do adapter HTTP; `useData` também faz polling a cada 10 segundos.
 
 **Path alias**: `@/*` resolves to repo **root**, not `src/`.
 
@@ -55,26 +52,26 @@ Interface e comentários novos devem permanecer em português brasileiro. Todos 
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev` | Vite on port 3000 bound to `0.0.0.0` (for Electron) |
-| `npm run build` | Vite/Electron build and local Windows `dir` + NSIS packaging; does not publish |
+| `npm run dev` | Frontend web em `127.0.0.1:3002`, proxy da API em 3001 |
+| `npm run build` | Build web, painel e backend; não publica |
 | `npm run lint` | `tsc --noEmit` (only verification; no test framework) |
-| `npm run clean` | Remove `dist/`, `dist-electron/`, `release/` e `../magisform-release/` |
+| `npm run clean` | Remove somente `dist-web/`, `dist-server/` e `dist-manager/` |
 
 ---
 
 ## Key Implementation Details
 
-- **Session**: Single active session/user. Electron heartbeat every 30s, local idle TTL 120s and absolute TTL 30 days; hosted policy uses 15min idle and 12h absolute. Cleanup runs every 60s.
-- **Force login**: Returns `conflict: true` if logged in elsewhere; pass `force: true` to override.
-- **Setup mode**: o login especial de configuração retorna `setupMode: true` e mostra apenas Settings. Não copie credenciais para documentação; consulte o código quando esse fluxo precisar mudar.
-- **Exit confirmation**: Blocks close/logout until modal confirmed (`app:confirm-exit` / `app:exit-confirmed`).
+- **Sessão**: uma sessão ativa por usuário, exclusivamente `hosted`. Prazos são definidos em `server/config.ts`; heartbeat passivo não renova inatividade. O frontend encerra por inatividade em 5 minutos.
+- **Login forçado**: conflito exige confirmação; `force: true` revoga a sessão anterior.
+- **Provisionamento**: administrador inicial somente pelo comando explícito. Configuração de banco fica no servidor, fora do navegador.
+- **Saída**: logout exige confirmação; rascunhos usam `beforeunload` ao fechar a aba.
 
 ---
 
 ## Conventions
 
 - UI strings and new comments: **Brazilian Portuguese**.
-- Never commit: `dist/`, `dist-electron/`, `release/`, `../magisform-release/`, `att.txt`, `db.txt`.
+- Never commit: `dist-web/`, `dist-server/`, `dist-manager/`, `att.txt`, `db.txt`.
 
 ---
 
@@ -96,16 +93,16 @@ A identidade segue `website/brand/GUIDE.md`. A fonte de cores do aplicativo é `
 ## Adding a Data Feature (Checklist)
 
 1. Update `database.sql` if schema changes
-2. Add IPC handler in `electron/main.ts`
-3. Expose in `electron/preload.ts`
-4. Add typed method in `src/services/lanDatabase.ts`
-5. Use `db.*` in React components via `useData` hook
+2. Defina contratos compartilhados e regras em `core/db.ts`.
+3. Adicione rota autenticada/validada em `server/app.ts`.
+4. Exponha o método HTTP tipado em `src/services/httpAdapter.ts` e na facade.
+5. Use `db.*` nos componentes via `useData`.
 
 ## Fluxo para novas tarefas
 
 1. Identifique a área em `docs/modules.md`.
 2. Consulte o documento de arquitetura, banco ou autenticação correspondente.
 3. Inspecione somente os entrypoints e dependências indicados.
-4. Faça a menor alteração consistente; novo acesso a dados segue a cadeia IPC → preload → service.
+4. Faça a menor alteração consistente; novo acesso a dados segue a cadeia service HTTP → API → core.
 5. Execute `npm run lint` e, quando bundling/empacotamento for afetado, `npm run build`.
 6. Atualize a documentação somente se uma fronteira arquitetural ou decisão mudar.

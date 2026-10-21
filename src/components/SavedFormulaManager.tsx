@@ -3,7 +3,7 @@ import { CheckCircle, Trash2, Search, X, PlusCircle, ClipboardList } from 'lucid
 import { motion } from 'motion/react';
 import { db } from '../services/lanDatabase';
 import { SavedFormula, SavedFormulaItem, Insumo, BudgetItem } from '../types';
-import { stripDiacritics, formatQuantity, formatCurrency, parseCurrency, currencyCaretPosition, formatQuantityInput, parseQuantity } from '../utils/format';
+import { stripDiacritics, formatQuantity, formatCurrency, parseCurrency, currencyCaretPosition, formatQuantityInput, parseQuantity, formatUnit } from '../utils/format';
 import { useData } from '../hooks/useData';
 import { useFormDraft } from '../context/FormDraftContext';
 import { LoadingState, ErrorState } from './Feedback';
@@ -12,15 +12,14 @@ import { AdminAuthModal } from './AdminAuthModal';
 import { InsumoManager } from './InsumoManager';
 import { COLORS } from '../../config/branding';
 import { UnitCycle, INGREDIENT_UNITS, BUDGET_UNITS } from './UnitCycle';
-import { useAuth } from '../context/AuthContext';
 
 export function SavedFormulaManager() {
   const { data: formulas, loading, error, reload } = useData('savedFormulas', activity => db.savedFormulas.list(activity));
   const { data: insumos, reload: reloadInsumos } = useData('insumos', activity => db.insumos.list(activity));
-  const { user, sessionToken } = useAuth();
   const [name, setName] = useState('');
   const [budgetNumber, setBudgetNumber] = useState('');
   const [items, setItems] = useState<SavedFormulaItem[]>([]);
+  const [editingIngredientId, setEditingIngredientId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [insumoQuery, setInsumoQuery] = useState('');
   const [selectedInsumoId, setSelectedInsumoId] = useState<number | ''>('');
@@ -75,11 +74,15 @@ export function SavedFormulaManager() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const reset = () => { setName(''); setBudgetNumber(''); setItems([]); setEditingId(null); setInsumoQuery(''); setSelectedInsumoId(''); setQuantity(''); setUnit('mg'); setBudgetItems([]); setBQty(''); setBUnit('doses'); setBValue(''); setFormError(''); setSuccess(null); };
+  const reset = () => { resetIngredientFields(); setName(''); setBudgetNumber(''); setItems([]); setEditingId(null); setBudgetItems([]); setBQty(''); setBUnit('doses'); setBValue(''); setSuccess(null); };
 
   const allFormulas = (formulas as SavedFormula[]) ?? [];
   const allInsumos = (insumos as Insumo[]) ?? [];
   const selectedInsumo = allInsumos.find(m => m.id === selectedInsumoId) ?? null;
+  const editingIngredient = items.find(item => item.insumo_id === editingIngredientId);
+  // Preserva quantidades decimais existentes ao alterar apenas a unidade.
+  const ingredientQuantity = editingIngredient && quantity === formatQuantity(editingIngredient.quantity)
+    ? Number(editingIngredient.quantity) : parseQuantity(quantity);
   const mq = useMemo(() => stripDiacritics(insumoQuery.trim().toLowerCase()), [insumoQuery]);
   const filteredInsumos = useMemo(() => {
     if (!mq) return [];
@@ -103,13 +106,59 @@ export function SavedFormulaManager() {
     focusListOption(ni);
   };
 
+  const resetIngredientFields = () => {
+    setEditingIngredientId(null);
+    setSelectedInsumoId('');
+    setInsumoQuery('');
+    setInsumoFocusIdx(-1);
+    setQuantity('');
+    setUnit('mg');
+    setShowAddInsumo(false);
+    setFormError('');
+  };
+
+  const startIngredientEdit = (item: SavedFormulaItem) => {
+    if (saving) return;
+    resetIngredientFields();
+    setEditingIngredientId(item.insumo_id);
+    setQuantity(formatQuantity(item.quantity));
+    setUnit(item.unit ?? 'mg');
+    requestAnimationFrame(() => {
+      quantityRef.current?.focus();
+      quantityRef.current?.select();
+    });
+  };
+
+  const cancelIngredientEdit = () => {
+    resetIngredientFields();
+    requestAnimationFrame(() => insumoQueryRef.current?.focus());
+  };
+
+  const updateIngredient = () => {
+    if (saving || !editingIngredient) return;
+    const parsedQuantity = ingredientQuantity;
+    if (parsedQuantity <= 0) { setFormError('Informe uma quantidade maior que zero.'); return; }
+    setItems(current => current.map(item => item.insumo_id === editingIngredientId
+      ? { ...item, quantity: parsedQuantity, unit } : item));
+    cancelIngredientEdit();
+  };
+
+  const removeIngredient = (id: number) => {
+    if (saving) return;
+    setItems(current => current.filter(item => item.insumo_id !== id));
+    if (editingIngredientId === id) cancelIngredientEdit();
+    setFormError('');
+  };
+
   const addItem = () => {
-    if (!selectedInsumoId || !quantity) return;
+    if (saving || editingIngredientId !== null || !selectedInsumoId) return;
+    const parsedQuantity = parseQuantity(quantity);
+    if (parsedQuantity <= 0) { setFormError('Informe uma quantidade maior que zero.'); return; }
     if (items.find(i => i.insumo_id === Number(selectedInsumoId))) {
       setFormError('Este insumo já foi adicionado à fórmula.');
       return;
     }
-    setItems([...items, { insumo_id: Number(selectedInsumoId), insumo_name: selectedInsumo?.name ?? '', quantity: parseQuantity(quantity), unit }]);
+    setItems([...items, { insumo_id: Number(selectedInsumoId), insumo_name: selectedInsumo?.name ?? '', quantity: parsedQuantity, unit }]);
     setSelectedInsumoId('');
     setInsumoQuery('');
     setQuantity('');
@@ -134,6 +183,8 @@ export function SavedFormulaManager() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saving) return;
+    if (editingIngredientId !== null) { setFormError('Atualize ou cancele a edição do ingrediente antes de salvar a fórmula.'); return; }
     const trimmed = name.trim();
     if (!trimmed) { setFormError('Informe o nome da fórmula.'); return; }
     if (items.length === 0) { setFormError('Adicione ao menos um insumo.'); return; }
@@ -148,12 +199,12 @@ export function SavedFormulaManager() {
     };
     try {
       if (editingId) {
-        const res: any = await db.savedFormulas.update(editingId, payload, sessionToken ?? undefined);
+        const res: any = await db.savedFormulas.update(editingId, payload);
         if (res?.success === false) { setFormError(res.error ?? 'Erro ao salvar.'); return; }
         removeDraft(DRAFT_KEY);
         reset(); setTab('list');
       } else {
-        const res: any = await db.savedFormulas.add(payload, sessionToken ?? undefined);
+        const res: any = await db.savedFormulas.add(payload);
         if (res?.success === false) { setFormError(res.error ?? 'Erro ao salvar.'); return; }
         removeDraft(DRAFT_KEY);
         reset();
@@ -173,7 +224,7 @@ export function SavedFormulaManager() {
   const handleDeleteConfirm = async (adminCreds?: { username: string; password: string }, token?: string) => {
     if (pendingDeleteId === null) return;
     try {
-      const res: any = await db.savedFormulas.remove(pendingDeleteId, adminCreds, token ?? sessionToken ?? undefined);
+      const res: any = await db.savedFormulas.remove(pendingDeleteId, adminCreds);
       if (res?.success === false) { setFormError(res.error ?? 'Erro ao excluir.'); return; }
       reload();
       setPendingDeleteId(null);
@@ -183,6 +234,7 @@ export function SavedFormulaManager() {
   };
 
   const startEdit = (f: SavedFormula) => {
+    resetIngredientFields();
     setEditingId(f.id);
     setName(f.name);
     setBudgetNumber(f.budget_number ?? '');
@@ -214,8 +266,8 @@ export function SavedFormulaManager() {
       )}
       <div>
         <label className="block text-xs font-semibold text-muted uppercase mb-1" htmlFor="mf-savedformulamanager-1" >Nome da Fórmula</label>
-        <input required className="ui-field w-full px-3 py-2 rounded-lg border border-control-line focus:ring-2 focus:ring-brand outline-none"
-          value={name} onChange={e => { setFormError(''); setName(e.target.value.toUpperCase()); }}  id="mf-savedformulamanager-1" />
+        <input id="mf-savedformulamanager-1" required className="ui-field w-full px-3 py-2 rounded-lg border border-control-line focus:ring-2 focus:ring-brand outline-none"
+          value={name} onChange={e => { setFormError(''); setName(e.target.value.toUpperCase()); }}  />
       </div>
 
       <div>
@@ -274,7 +326,7 @@ export function SavedFormulaManager() {
               <div key={idx} className="flex items-center gap-3 p-3 rounded-xl border border-line"
                 style={{ background: idx % 2 === 0 ? COLORS.rowAlt : COLORS.surface }}>
                 <p className="text-sm text-ink flex-1 min-w-0">
-                  <strong>{formatQuantity(bi.quantity)}</strong> {bi.unit} · <span className="font-semibold text-ink">R$ {bi.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <strong>{formatQuantity(bi.quantity)}</strong> {formatUnit(bi.unit)} · <span className="font-semibold text-ink">R$ {bi.value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </p>
                 <button type="button" onClick={() => removeBudgetItem(idx)}
                   className="ui-button ui-icon-button text-muted hover:text-danger transition-colors ml-4 p-1" title="Remover item do orçamento">
@@ -292,20 +344,22 @@ export function SavedFormulaManager() {
       <div className="border border-line rounded-xl p-4 space-y-3">
         <h3 className="text-xs font-semibold text-muted uppercase">Composição</h3>
 
-        {showAddInsumo && addInsumoBlock}
+        {showAddInsumo && !editingIngredient && addInsumoBlock}
 
-        {selectedInsumo ? (
+        {editingIngredient || selectedInsumo ? (
           <div className="flex items-center justify-between p-3 rounded-xl border border-line bg-canvas">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-9 h-9 rounded-lg bg-info-strong flex items-center justify-center shrink-0">
                 <ClipboardList className="w-4 h-4 text-brand" />
               </div>
-              <p className="font-semibold text-ink text-sm truncate">{selectedInsumo.name}</p>
+              <p className="font-semibold text-ink text-sm truncate">{editingIngredient ? editingIngredient.insumo_name : selectedInsumo?.name}</p>
             </div>
-            <button type="button" onClick={() => { setSelectedInsumoId(''); setInsumoQuery(''); }}
-              className="ui-button ui-icon-button p-2 text-muted hover:text-danger transition-colors ml-3" title="Trocar insumo">
-              <X className="w-4 h-4" />
-            </button>
+            {!editingIngredient && (
+              <button type="button" onClick={() => { setSelectedInsumoId(''); setInsumoQuery(''); }}
+                className="ui-button ui-icon-button p-2 text-muted hover:text-danger transition-colors ml-3" title="Trocar insumo">
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
         ) : (
           <div className="relative">
@@ -386,42 +440,55 @@ export function SavedFormulaManager() {
           </div>
         )}
 
-        {selectedInsumo && (
-          <div className="flex flex-wrap gap-3 items-end">
+        {(editingIngredient || selectedInsumo) && (
+          <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 sm:items-end">
             <div className="flex-1 min-w-[110px]">
-              <label className="block text-xs font-semibold text-muted uppercase mb-1" htmlFor="mf-savedformulamanager-5" >Quantidade</label>
-              <input ref={quantityRef} inputMode="numeric" maxLength={8} required
+              <label htmlFor="saved-ingredient-quantity" className="block text-xs font-semibold text-muted uppercase mb-1">Quantidade</label>
+              <input id="saved-ingredient-quantity" ref={quantityRef} inputMode="numeric" maxLength={8} required disabled={saving}
                 className="ui-field w-full px-3 py-2 rounded-lg border border-control-line focus:ring-2 focus:ring-brand outline-none text-sm text-right"
                 value={quantity}
-                onChange={e => setQuantity(formatQuantityInput(e.target.value))}  id="mf-savedformulamanager-5" />
+                onChange={e => { setQuantity(formatQuantityInput(e.target.value)); setFormError(''); }} />
             </div>
             <div className="flex-1 min-w-[110px]">
               <label className="block text-xs font-semibold text-muted uppercase mb-1">Unidade</label>
-              <UnitCycle value={unit} onChange={setUnit} options={INGREDIENT_UNITS} />
+              <UnitCycle value={unit} onChange={setUnit} options={INGREDIENT_UNITS} disabled={saving} />
             </div>
-            <button type="button" disabled={!quantity} onClick={addItem}
+            <button type="button" disabled={saving || ingredientQuantity <= 0} onClick={editingIngredient ? updateIngredient : addItem}
               className="ui-button ui-button-secondary w-full sm:w-auto text-surface px-4 py-2 rounded-lg font-medium text-sm hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
-              + Adicionar
+              {editingIngredient ? 'Atualizar ingrediente' : '+ Adicionar'}
             </button>
+            {editingIngredient && <button type="button" disabled={saving} onClick={cancelIngredientEdit} className="ui-button px-3 py-2 rounded-lg bg-sage text-muted hover:bg-sage text-sm font-semibold transition-colors">Cancelar</button>}
           </div>
         )}
+
+        {quantity !== '' && ingredientQuantity <= 0 && <p className="text-xs font-medium" style={{ color: COLORS.primary }}>Informe uma quantidade maior que zero.</p>}
+        {editingIngredient && <p role="status" className="text-xs" style={{ color: COLORS.secondary }}>Atualize ou cancele a edição do ingrediente antes de salvar a fórmula.</p>}
 
         {items.length === 0 ? (
           <p className="text-sm text-muted">Nenhum insumo adicionado ainda.</p>
         ) : (
           <div className="space-y-2">
             {items.map((item, idx) => (
-              <div key={idx} className="flex items-center justify-between p-3 rounded-xl border border-line"
-                style={{ background: idx % 2 === 0 ? COLORS.rowAlt : COLORS.surface }}>
+              <div key={item.insumo_id} className="flex items-center justify-between p-3 rounded-xl border border-line"
+                style={{ background: editingIngredientId === item.insumo_id ? COLORS.infoSoft : idx % 2 === 0 ? COLORS.rowAlt : COLORS.surface, borderColor: editingIngredientId === item.insumo_id ? COLORS.infoBorder : undefined }}>
                 <div className="min-w-0">
                   <p className="font-semibold text-ink text-sm truncate">{item.insumo_name}</p>
                   <p className="text-xs text-muted">{formatQuantity(item.quantity)} {item.unit ?? 'mg'}</p>
                 </div>
-                <button type="button" onClick={() => { setItems(items.filter((_, i) => i !== idx)); setFormError(''); }}
-                  className="ui-button ui-icon-button text-muted hover:text-danger transition-colors ml-4 p-1" title="Remover insumo">
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-2 ml-3 shrink-0">
+                  <button type="button" disabled={saving} onClick={() => editingIngredientId === item.insumo_id ? cancelIngredientEdit() : startIngredientEdit(item)}
+                    aria-label={`${editingIngredientId === item.insumo_id ? 'Cancelar edição de' : 'Editar'} ${item.insumo_name}`}
+                    aria-pressed={editingIngredientId === item.insumo_id}
+                    className={`ui-button text-xs font-semibold px-3 py-1 rounded-lg transition-colors ${editingIngredientId === item.insumo_id ? 'bg-sage text-muted hover:bg-sage' : 'hover:bg-sage'}`}
+                    style={editingIngredientId === item.insumo_id ? undefined : { color: COLORS.secondary }}>
+                    {editingIngredientId === item.insumo_id ? 'Cancelar' : 'Editar'}
+                  </button>
+                  <button type="button" disabled={saving} onClick={() => removeIngredient(item.insumo_id)}
+                    className="ui-button ui-icon-button text-muted hover:text-danger transition-colors p-1" title="Remover insumo" aria-label={`Remover ${item.insumo_name}`}>
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -430,7 +497,7 @@ export function SavedFormulaManager() {
 
       {formError && <p className="text-xs text-danger font-medium">{formError}</p>}
       <div className="flex gap-2">
-        <button type="submit" disabled={saving}
+        <button type="submit" disabled={saving || editingIngredientId !== null} style={{ background: COLORS.primary }}
           className="ui-button ui-button-primary flex-1 text-on-coral py-2 px-4 rounded-lg font-medium hover:opacity-90 disabled:opacity-50 transition-all text-sm">
           {saving ? '...' : editingId ? 'Atualizar' : 'Adicionar'}
         </button>
@@ -446,7 +513,8 @@ export function SavedFormulaManager() {
     return allFormulas
       .filter(f => {
         if (!q) return true;
-        return stripDiacritics((f.name ?? '').toLowerCase()).includes(q);
+        return stripDiacritics((f.name ?? '').toLowerCase()).includes(q)
+          || stripDiacritics((f.created_by_name ?? '').toLowerCase()).includes(q);
       })
       .sort((a, b) => {
         if (q) {
@@ -532,7 +600,7 @@ export function SavedFormulaManager() {
                             {f.items.map(i => `${i.insumo_name} ${formatQuantity(i.quantity)} ${i.unit ?? 'mg'}`).join(', ')}
                           </td>
                           <td className="px-4 py-3 text-muted text-sm">—</td>
-                          <td className="px-4 py-3 text-ink text-sm">{user.name}</td>
+                          <td className="px-4 py-3 text-ink text-sm">{f.created_by_name || 'Não identificado'}</td>
                           <td className="px-4 py-3 text-muted text-sm">{f.created_at ? new Date(f.created_at).toLocaleString('pt-BR') : '—'}</td>
                           <td className="px-4 py-3 text-right space-x-3">
                             <button onClick={() => startEdit(f)} className="ui-button text-muted hover:text-info text-sm transition-colors">Editar</button>

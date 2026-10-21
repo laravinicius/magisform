@@ -25,3 +25,8 @@ export function formatDbError(error: unknown): string {
 
   return 'Erro desconhecido ao conectar ao banco.';
 }
+
+// Erro de regra de negócio que pode ser apresentado sem expor detalhes do banco.
+export class BusinessRuleError extends Error {
+  constructor(message: string, readonly status: 400 | 404 | 409 = 400) { super(message); }
+}

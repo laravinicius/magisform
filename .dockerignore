@@ -3,14 +3,11 @@
 .agents
 .cache
 node_modules
-dist
-dist-electron
 dist-server
 dist-web
-release
+dist-manager
 coverage
 .playwright-cli
-.client-build
 output
 website
 deploy/tenants
@@ -21,6 +18,9 @@ tests
 .env.*
 !.env.example
 config.json
+manager-state
+docker-data
+migrations
 att.txt
 db.txt
 info.txt

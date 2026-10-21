@@ -98,12 +98,6 @@
   .ui-formula-grid-pending { min-width: 66rem; }
   .ui-row { border-radius: 12px; }
 }
-.titlebar { position: fixed; inset: 0 0 auto; height: 30px; -webkit-app-region: drag; z-index: 9999; display: flex; align-items: center; padding-left: 12px; background: var(--mf-secondary); color: var(--mf-surface); font-size: 12px; font-weight: 600; user-select: none; }
-.titlebar-controls { display: flex; height: 100%; margin-left: auto; -webkit-app-region: no-drag; }
-.titlebar-button { display: flex; align-items: center; justify-content: center; width: 46px; height: 100%; border: 0; background: transparent; color: inherit; cursor: pointer; -webkit-app-region: no-drag; }
-.titlebar-button:hover { background: var(--mf-secondary-hover); }
-.titlebar-button-close:hover { background: var(--mf-danger); }
-.titlebar-button:focus-visible { outline: 2px solid var(--mf-surface); outline-offset: -3px; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--mf-control-border); border-radius: 99px; border: 2px solid var(--mf-surface); }
@@ -125,3 +119,92 @@
 .ui-sidebar[data-collapsed="true"] > div, .ui-sidebar[data-collapsed="true"] nav { padding-inline: 8px; }
 .ui-sidebar[data-collapsed="true"] .ui-button { padding-inline: 0; justify-content: center; }
 .ui-sidebar[data-collapsed="true"] .ui-user { padding: 8px; justify-content: center; }
+
+/* O Histórico acompanha a largura útil e a escala de fonte da aplicação. */
+.formula-history {
+  container: formula-history / inline-size;
+}
+
+.formula-history-header {
+  display: none;
+}
+
+.formula-history-row > *,
+.formula-history-row > * > p,
+.formula-history-header > span {
+  overflow-wrap: anywhere;
+}
+
+.formula-history-row > [data-label="Quantidade"] > p,
+.formula-history-row > [data-label="Restante"] {
+  white-space: normal;
+}
+
+.formula-history-row button {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.formula-history-row button > svg,
+.formula-history-row > [data-label="Ações"] > div {
+  flex-shrink: 0;
+}
+
+.formula-history-row > [data-label="Ações"] {
+  flex-wrap: wrap;
+}
+
+@container formula-history (width < 64rem) {
+  .formula-list-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .formula-list-tools,
+  .formula-list-search {
+    min-width: 0;
+  }
+
+  .formula-list-search {
+    flex: 1;
+  }
+
+  .formula-list-search input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .formula-history-row > [data-label] {
+    display: block;
+    white-space: normal;
+    text-align: left;
+  }
+
+  .formula-history-row > [data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--mf-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .formula-history-row > [data-label="Ações"] {
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  .formula-history-row > [data-label="Ações"]::before {
+    flex-basis: 100%;
+  }
+}
+
+@container formula-history (width >= 64rem) {
+  .formula-history-header,
+  .formula-history-row {
+    display: grid;
+    grid-template-columns: var(--formula-columns);
+  }
+}

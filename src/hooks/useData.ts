@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { db, type DataActivity } from '../services/lanDatabase';
 
-interface PerfMetrics { ipcDurationMs: number; reloadCount: number; sqlQueryCount: number; recordsReturned: number; concurrentLoads: number; lastError: string | null }
-const globalMetrics: PerfMetrics = { ipcDurationMs: 0, reloadCount: 0, sqlQueryCount: 0, recordsReturned: 0, concurrentLoads: 0, lastError: null };
+interface PerfMetrics { httpDurationMs: number; reloadCount: number; sqlQueryCount: number; recordsReturned: number; concurrentLoads: number; lastError: string | null }
+const globalMetrics: PerfMetrics = { httpDurationMs: 0, reloadCount: 0, sqlQueryCount: 0, recordsReturned: 0, concurrentLoads: 0, lastError: null };
 let activeLoads = 0;
 export function getPerfMetrics(): PerfMetrics { return { ...globalMetrics }; }
-export function resetPerfMetrics(): void { Object.assign(globalMetrics, { ipcDurationMs: 0, reloadCount: 0, sqlQueryCount: 0, recordsReturned: 0, concurrentLoads: 0, lastError: null }); activeLoads = 0; }
+export function resetPerfMetrics(): void { Object.assign(globalMetrics, { httpDurationMs: 0, reloadCount: 0, sqlQueryCount: 0, recordsReturned: 0, concurrentLoads: 0, lastError: null }); activeLoads = 0; }
 
 interface Resource<T> { data: T | null; loading: boolean; error: string | null; subscribers: Set<() => void>; inFlight: Promise<T> | null; timer: ReturnType<typeof setInterval> | null; unlisten: (() => void) | null }
 const resources = new Map<string, Resource<any>>();
@@ -23,7 +23,7 @@ async function load<T>(entry: Resource<T>, fetcher: (activity: DataActivity) => 
   entry.inFlight = (async () => {
     try {
       const data = await fetcher(activity);
-      globalMetrics.ipcDurationMs += performance.now() - started;
+      globalMetrics.httpDurationMs += performance.now() - started;
       globalMetrics.reloadCount++;
       globalMetrics.lastError = null;
       globalMetrics.recordsReturned += Array.isArray(data) ? data.length : data && typeof data === 'object' ? 1 : 0;

@@ -1,10 +1,10 @@
 import type { BusinessOperations, ErrorEnvelopeDto, OperationResultDto, FormulaListQueryDto } from '../../shared/contracts';
 import type { DataActivity } from './lanDatabase';
-import type { DesktopLoginResultDto } from './ipcAdapter';
+type LoginResultDto = OperationResultDto;
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 let csrfToken: string | null = null;
-let currentSessionRequest: Promise<DesktopLoginResultDto> | null = null;
+let currentSessionRequest: Promise<LoginResultDto> | null = null;
 let sessionGeneration = 0;
 const sessionListeners = new Set<() => void>();
 const changeListeners = new Set<() => void>();
@@ -47,9 +47,9 @@ const idPath = (base: string, id: number) => `${base}/${encodeURIComponent(id)}`
 
 export const httpBusinessAdapter = {
   auth: {
-    async login(username: string, password: string, force = false): Promise<DesktopLoginResultDto> {
+    async login(username: string, password: string, force = false): Promise<LoginResultDto> {
       try {
-        const response = await request<{ user: DesktopLoginResultDto['user'] }>('/auth/login', 'POST', { username, password, force });
+        const response = await request<{ user: LoginResultDto['user'] }>('/auth/login', 'POST', { username, password, force });
         clearWebResources();
         return { success: true, user: response.user };
       } catch (error) {
@@ -67,9 +67,9 @@ export const httpBusinessAdapter = {
       try { return await request('/auth/heartbeat', 'POST', {}, 'passive'); }
       catch (error) { if (error instanceof HttpApiError && error.status === 401) return { valid: false }; throw error; }
     },
-    current(): Promise<DesktopLoginResultDto> {
+    current(): Promise<LoginResultDto> {
       currentSessionRequest ??= (async () => {
-        try { const response = await request<{ authenticated: boolean; user: DesktopLoginResultDto['user'] }>('/auth/me', 'GET', undefined, 'passive', true); return { success: response.authenticated, user: response.user }; }
+        try { const response = await request<{ authenticated: boolean; user: LoginResultDto['user'] }>('/auth/me', 'GET', undefined, 'passive', true); return { success: response.authenticated, user: response.user }; }
         catch (error) { if (error instanceof HttpApiError && error.status === 401) return { success: false }; throw error; }
       })();
       return currentSessionRequest;
@@ -99,11 +99,12 @@ export const httpBusinessAdapter = {
   formulas: {
     list: (filters: FormulaListQueryDto, activity: DataActivity = 'user') => { const query = new URLSearchParams(); query.set('limit', String(filters.limit)); if (filters.cursor) query.set('cursor', filters.cursor); if (filters.statuses?.length) query.set('statuses', filters.statuses.join(',')); if (filters.deliveryStatus) query.set('deliveryStatus', filters.deliveryStatus); if (filters.search) query.set('search', filters.search); return request<Awaited<ReturnType<BusinessOperations['formulas']['list']>>>(`/formulas?${query}`, 'GET', undefined, activity); },
     get: (id: number) => request<Awaited<ReturnType<BusinessOperations['formulas']['get']>>>(idPath('/formulas', id), 'GET'),
-    summary: (month: number, year: number) => request<Awaited<ReturnType<BusinessOperations['formulas']['summary']>>>(`/formulas-summary?month=${month}&year=${year}`, 'GET'),
+    summary: (month: number, year: number, paymentStatus: import('../../shared/contracts').SummaryPaymentStatus = 'pago', activity: DataActivity = 'user') => request<Awaited<ReturnType<BusinessOperations['formulas']['summary']>>>(`/formulas-summary?month=${month}&year=${year}&paymentStatus=${paymentStatus}`, 'GET', undefined, activity),
     add: (input: Parameters<BusinessOperations['formulas']['add']>[0]) => result(request('/formulas', 'POST', input, 'user')),
     update: (id: number, input: Parameters<BusinessOperations['formulas']['update']>[1]) => result(request(idPath('/formulas', id), 'PATCH', input, 'user')),
     updateStatus: (id: number, status: string) => result(request(`${idPath('/formulas', id)}/status`, 'PATCH', { status }, 'user')),
     updateDeliveryStatus: (id: number, status: string) => result(request(`${idPath('/formulas', id)}/delivery-status`, 'PATCH', { status }, 'user')),
+    updatePayment: (id: number, payment: import('../../shared/contracts').FormulaPaymentUpdate) => result(request(`${idPath('/formulas', id)}/payment`, 'PATCH', payment, 'user')),
     verify: (id: number) => result(request(`${idPath('/formulas', id)}/verification`, 'POST', {}, 'user')),
     updateDeliveriesStatus: (ids: number[], status: string) => result(request('/formulas/delivery-status-batch', 'PATCH', { ids, status }, 'user')),
     remove: (id: number, credentials?: Parameters<BusinessOperations['formulas']['remove']>[1]) => result(request(idPath('/formulas', id), 'DELETE', credentials ?? {}, 'user')),
@@ -112,7 +113,7 @@ export const httpBusinessAdapter = {
     list: (activity: DataActivity = 'user') => request<Awaited<ReturnType<BusinessOperations['savedFormulas']['list']>>>('/saved-formulas', 'GET', undefined, activity),
     add: (input: Parameters<BusinessOperations['savedFormulas']['add']>[0]) => result(request('/saved-formulas', 'POST', input, 'user')),
     update: (id: number, input: Parameters<BusinessOperations['savedFormulas']['update']>[1]) => result(request(idPath('/saved-formulas', id), 'PATCH', input, 'user')),
-    remove: (id: number, credentials?: Parameters<BusinessOperations['savedFormulas']['remove']>[1]) => result(request(idPath('/savedFormulas', id), 'DELETE', credentials ?? {}, 'user')),
+    remove: (id: number, credentials?: Parameters<BusinessOperations['savedFormulas']['remove']>[1]) => result(request(idPath('/saved-formulas', id), 'DELETE', credentials ?? {}, 'user')),
   },
   logs: { list: (filters?: Parameters<BusinessOperations['logs']['list']>[0], activity: DataActivity = 'user') => { const query = new URLSearchParams(); for (const [key, value] of Object.entries(filters ?? {})) if (value !== undefined && value !== '') query.set(key, String(value)); return request<Awaited<ReturnType<BusinessOperations['logs']['list']>>>(`/logs${query.size ? `?${query}` : ''}`, 'GET', undefined, activity); } },
   data: { onChanged: (listener: () => void) => { changeListeners.add(listener); return () => changeListeners.delete(listener); } },
