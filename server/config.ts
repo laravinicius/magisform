@@ -18,7 +18,7 @@ const envSchema = z.object({
   MAGISFORM_SERVER_BRAND_SURFACE: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#FFFDF8'),
   MAGISFORM_SERVER_BRAND_INK: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#17201D'),
   MAGISFORM_SERVER_BRAND_MUTED: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#5F6965'),
-  MAGISFORM_SERVER_VERSION: z.string().trim().min(1).max(40).default('0.2.4'),
+  MAGISFORM_SERVER_VERSION: z.string().trim().min(1).max(40).default('0.2.8'),
   MAGISFORM_SERVER_DB_HOST: z.string().min(1),
   MAGISFORM_SERVER_DB_PORT: z.coerce.number().int().min(1).max(65535).default(3306),
   MAGISFORM_SERVER_DB_NAME: z.string().min(1),

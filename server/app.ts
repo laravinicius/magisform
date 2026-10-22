@@ -172,7 +172,9 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
   const paramId = (req: FastifyRequest) => parsed(idParams, req.params).id;
   const rate = { rateLimit: { hook: 'preHandler' as const, max: 8, timeWindow: '15 minutes', keyGenerator: (req: FastifyRequest) => `${req.ip}:${String((req.body as any)?.username ?? '').toLowerCase()}` } };
 
-  addRoute('GET','/health/live', async () => ({ data: { status: 'ok' } }));
+  const liveHealth = async () => ({ data: { status: 'ok' } });
+  app.get('/health/live', liveHealth);
+  addRoute('GET','/health/live', liveHealth);
   addRoute('GET','/health/ready', async (_req, reply) => {
     try {
       await pool.query('SELECT 1');
@@ -225,7 +227,7 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
   crud('/insumos', () => db.listInsumos(), (v) => db.addInsumo(typeof v === 'string' ? v : v.name), (i,v) => db.updateInsumo(i, typeof v === 'string' ? v : v.name), (i,v) => db.deleteInsumo(i,v), insumoInput, insumoInput);
   addRoute('GET', '/formulas', async (req, reply) => {
     const q = parsed(formulaQuery, req.query);
-    if (!q.limit) return reply.code(426).send({ error: { code: 'CLIENT_UPDATE_REQUIRED', message: 'Atualize o MagisForm para a versão 0.2.3 ou superior para consultar fórmulas.' } });
+    if (!q.limit) return reply.code(426).send({ error: { code: 'CLIENT_UPDATE_REQUIRED', message: 'Atualize o MagisForm para a versão 0.2.8 ou superior para consultar fórmulas.' } });
     const statuses = q.statuses ? q.statuses.split(',') : [];
     if (statuses.some((status) => !['pending','confirmed','cancelled','delivered'].includes(status))) throw Object.assign(new Error('Filtro de status inválido.'), { statusCode: 400 });
     return data(await db.listFormulas({ cursor: q.cursor, limit: Number(q.limit), statuses: statuses as any, deliveryStatus: q.deliveryStatus, search: q.search }));
