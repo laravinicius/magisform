@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "magisform-piloto",
+  "name": "magisform",
   "main": "cloudflare/worker.ts",
   "compatibility_date": "2026-10-23",
   "workers_dev": true,
