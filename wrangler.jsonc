@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "magisform-piloto",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "c21decb3-8d00-4a4d-9340-f0511ac14e3e",
       "migrations_dir": "cloudflare/migrations"
     }
   ],
