@@ -24,9 +24,16 @@
     "db:preflight": "node scripts/database-schema.mjs preflight",
     "db:upgrade": "node scripts/database-schema.mjs upgrade",
     "tenant:provision": "node scripts/provision-tenant.mjs",
-    "test": "node scripts/check-shared-boundary.mjs && vitest run --config vitest.config.ts",
+    "test": "node scripts/check-shared-boundary.mjs && vitest run --config vitest.config.ts && vitest run --config vitest.workers.config.ts",
     "test:integration": "node scripts/test-integration.mjs",
-    "test:docker": "npm run build && docker build -t magisform:web-removal-qa . && node scripts/test-web-docker.mjs"
+    "test:docker": "npm run build && docker build -t magisform:web-removal-qa . && node scripts/test-web-docker.mjs",
+    "build:cloudflare": "npm run build:web && wrangler deploy --dry-run --outdir .wrangler/deploy",
+    "lint:cloudflare": "tsc --noEmit -p cloudflare/tsconfig.json",
+    "test:workers": "vitest run --config vitest.workers.config.ts",
+    "cf:local": "wrangler dev",
+    "d1:schema:sync": "node scripts/sync-cloudflare-schema.mjs",
+    "d1:preflight:local": "wrangler d1 migrations list magisform-piloto --local",
+    "d1:upgrade:local": "wrangler d1 migrations apply magisform-piloto --local"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
@@ -43,6 +50,8 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.5",
+    "@cloudflare/workers-types": "^5.20261023.1",
     "@tailwindcss/vite": "^4.1.14",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.4",
@@ -53,7 +62,8 @@
     "tsx": "^4.23.15",
     "typescript": "~5.8.2",
     "vite": "^6.2.0",
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "wrangler": "^4.152.0"
   },
   "allowScripts": {
     "argon2@0.45.1": true

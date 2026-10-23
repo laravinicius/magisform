@@ -221,10 +221,10 @@ export function SavedFormulaManager() {
     setDeleteModalOpen(true);
   };
 
-  const handleDeleteConfirm = async (adminCreds?: { username: string; password: string }, token?: string) => {
+  const handleDeleteConfirm = async () => {
     if (pendingDeleteId === null) return;
     try {
-      const res: any = await db.savedFormulas.remove(pendingDeleteId, adminCreds);
+      const res: any = await db.savedFormulas.remove(pendingDeleteId);
       if (res?.success === false) { setFormError(res.error ?? 'Erro ao excluir.'); return; }
       reload();
       setPendingDeleteId(null);

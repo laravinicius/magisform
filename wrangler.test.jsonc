@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "magisform-workers-tests",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-10-23",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "magisform-tests",
+      "database_id": "local-test-database",
+      "migrations_dir": "cloudflare/migrations"
+    }
+  ],
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "magisform-test.cloudflareaccess.com",
+    "ACCESS_AUD": "magisform-test-audience"
+  }
+}

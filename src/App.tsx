@@ -14,7 +14,6 @@ import { NavItem } from './components/NavItem';
 import { AdminPanel } from './components/UserManager';
 import { CustomerManager } from './components/CustomerManager';
 import { InsumoManager } from './components/InsumoManager';
-import { SettingsManager } from './components/SettingsManager';
 import { Dashboard } from './components/Dashboard';
 import { RecipeForm } from './components/RecipeForm';
 import { FormulaList } from './components/FormulaList';
@@ -23,6 +22,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { FormDraftProvider, useFormDraft } from './context/FormDraftContext';
 import { AdminAuthModal } from './components/AdminAuthModal';
 import { handleDialogArrowNavigation, handleEnterAsTab } from './utils/enterNavigation';
+import { TenantSelector } from './components/TenantSelector';
+import { PlatformManagement } from './components/PlatformManagement';
 
 interface HeartbeatMetrics {
   callCount: number;
@@ -114,7 +115,6 @@ function AppInner() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth >= 900);
   const [formulasMenuOpen, setFormulasMenuOpen] = useState(true);
   const [managementMenuOpen, setManagementMenuOpen] = useState(true);
-  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'info' } | null>(null);
@@ -163,7 +163,6 @@ function AppInner() {
     setPartialPaymentAmounts({});
 
     setActiveTab('dashboard');
-    setLoginForm({ username: '', password: '' });
     setLoginError('Sessão encerrada por inatividade (5 min).');
   }, [clearAuth, clearDrafts]);
 
@@ -244,7 +243,7 @@ function AppInner() {
   const doLogin = async (force: boolean) => {
     setLoginLoading(true); setLoginError('');
     try {
-      const res = await db.auth.login(loginForm.username, loginForm.password, force);
+      const res = await db.auth.login(force);
       if (res.success) {
         clearDrafts();
         setAuth(res.user);
@@ -278,7 +277,6 @@ function AppInner() {
     clearAuth();
     setPartialPaymentAmounts({});
     setActiveTab('dashboard');
-    setLoginForm({ username: '', password: '' });
     setShowExitConfirm(false);
   };
 
@@ -377,33 +375,10 @@ function AppInner() {
             </div>
             <div className="px-8 py-6">
             <div className="flex flex-col items-center mb-8">
-              <p className="text-muted text-sm mt-2">Acesse sua conta para continuar</p>
+            <p className="text-muted text-sm mt-2">Acesso protegido pelo Cloudflare</p>
             </div>
             <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-ink mb-1" htmlFor="mf-app-1" >Usuário</label>
-                <input type="text" required autoFocus
-                  className="ui-field w-full px-4 py-2 rounded-lg border border-control-line focus:ring-2 focus:ring-brand outline-none transition-all"
-                  value={loginForm.username}
-                  autoComplete="username"
-                  onChange={e => setLoginForm({ ...loginForm, username: e.target.value })}
-                 id="mf-app-1" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-ink mb-1" htmlFor="mf-app-2" >Senha</label>
-                <input type="password" required
-                  className="ui-field w-full px-4 py-2 rounded-lg border border-control-line focus:ring-2 focus:ring-brand outline-none transition-all"
-                  value={loginForm.password}
-                  autoComplete="current-password"
-                  onChange={e => setLoginForm({ ...loginForm, password: e.target.value })}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !loginLoading) {
-                      e.preventDefault();
-                      e.currentTarget.form?.requestSubmit();
-                    }
-                  }}
-                 id="mf-app-2" />
-              </div>
+              <p className="text-sm text-muted text-center">O Cloudflare Access verifica o código enviado ao e-mail autorizado para esta farmácia.</p>
               {loginError && (
                 <div className="flex items-center gap-2 text-danger text-sm bg-danger-soft px-3 py-2 rounded-lg">
                   <AlertCircle className="w-4 h-4 shrink-0" />{loginError}
@@ -413,7 +388,7 @@ function AppInner() {
                 className="ui-button ui-button-primary ui-popover w-full hover:opacity-90 disabled:opacity-60 text-on-coral font-semibold py-2.5 rounded-lg transition-all  "
 
               >
-                {loginLoading ? 'Conectando...' : 'Entrar'}
+                {loginLoading ? 'Conectando...' : 'Continuar'}
               </button>
             </form>
             </div>
@@ -656,15 +631,17 @@ function AppInner() {
 }
 
 export default function App() {
+  const isTenantRoute=/^\/t\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\/|$)/.test(window.location.pathname);
+  const isManagementRoute=window.location.pathname==='/management' || window.location.pathname==='/management/';
   return (
     <MotionConfig reducedMotion="user">
-    <AuthProvider>
-      <FormDraftProvider>
-        <div className="h-screen overflow-hidden bg-canvas flex flex-col" onKeyDown={handleEnterAsTab}>
-          <AppInner />
-        </div>
-      </FormDraftProvider>
-    </AuthProvider>
+      {isTenantRoute ? <AuthProvider>
+        <FormDraftProvider>
+          <div className="h-screen overflow-hidden bg-canvas flex flex-col" onKeyDown={handleEnterAsTab}>
+            <AppInner />
+          </div>
+        </FormDraftProvider>
+      </AuthProvider> : isManagementRoute ? <PlatformManagement/> : <TenantSelector/>}
     </MotionConfig>
   );
 }

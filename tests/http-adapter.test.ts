@@ -56,7 +56,7 @@ describe('adapter web com cookie e CSRF', () => {
     const changed = vi.fn();
     const cleanup = db.auth.onSessionChanged(changed);
     try {
-      expect(await db.auth.login('gerente', 'senha-qa')).toEqual({ success: true, user: { id: 1, role: 'manager' } });
+      expect(await db.auth.login()).toEqual({ success: true, user: { id: 1, role: 'manager' } });
       expect(changed).toHaveBeenCalledOnce();
       expect((await db.auth.current()).success).toBe(true);
       expect(fetchMock.mock.calls[2][1].credentials).toBe('same-origin');
@@ -78,7 +78,7 @@ describe('adapter web com cookie e CSRF', () => {
 
   it('exclui modelo pela rota web e invalida recursos ao sair', async () => {
     fetchMock.mockResolvedValueOnce(ok({ csrfToken: 'csrf-qa' })).mockResolvedValueOnce(ok({ success: true })).mockResolvedValueOnce(ok({ success: true }));
-    await db.savedFormulas.remove(7, { username: 'admin', password: 'senha-qa' });
+    await db.savedFormulas.remove(7);
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/saved-formulas/7');
     const generation = db.auth.sessionGeneration();
     await db.auth.logout();

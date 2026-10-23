@@ -24,7 +24,7 @@ export function AdminPanel({ user }: { user: User }) {
 
 export function UserManager({ user }: { user: User }) {
   const { data: users, loading, error, reload } = useData('users', activity => db.users.list(activity));
-  const emptyForm = { name: '', username: '', password: '', role: 'employee' as UserRole };
+  const emptyForm = { name: '', username: '', role: 'employee' as UserRole };
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -60,7 +60,7 @@ export function UserManager({ user }: { user: User }) {
   };
 
   const startEdit = (u: any) => {
-    setForm({ name: u.name, username: u.username, password: '', role: u.role });
+    setForm({ name: u.name, username: u.username, role: u.role });
     setEditingId(u.id);
     setFormError('');
     // Scroll suave ao formulário
@@ -71,19 +71,12 @@ export function UserManager({ user }: { user: User }) {
     e.preventDefault();
     setFormError('');
 
-    if (!editingId && !form.password.trim()) {
-      setFormError('Informe uma senha para o novo funcionário.');
-      return;
-    }
-
     setSaving(true);
     try {
       if (editingId) {
-        // Edição: senha em branco = não altera
         const res: any = await db.users.update(editingId, {
           name: form.name.trim(),
           username: form.username.trim(),
-          password: form.password.trim() || undefined,
           role: form.role,
         });
         if (res && res.success === false) {
@@ -94,7 +87,6 @@ export function UserManager({ user }: { user: User }) {
         const res: any = await db.users.add({
           name: form.name.trim(),
           username: form.username.trim(),
-          password: form.password.trim(),
           role: form.role,
         });
         if (res && res.success === false) {
@@ -121,10 +113,10 @@ export function UserManager({ user }: { user: User }) {
     setDeleteModalOpen(true);
   };
 
-  const handleDeleteConfirm = async (adminCreds?: { username: string; password: string }, token?: string) => {
+  const handleDeleteConfirm = async () => {
     if (pendingDeleteId === null) return;
     try {
-      const res: any = await db.users.remove(pendingDeleteId, adminCreds);
+      const res: any = await db.users.remove(pendingDeleteId);
       if (res?.success === false) { setFormError(res.error ?? 'Erro ao excluir.'); return; }
       reload();
       setPendingDeleteId(null);
@@ -164,27 +156,16 @@ export function UserManager({ user }: { user: User }) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-muted uppercase mb-1" htmlFor="mf-usermanager-2" >Usuário de acesso</label>
+            <label className="block text-xs font-semibold text-muted uppercase mb-1" htmlFor="mf-usermanager-2" >E-mail autorizado</label>
             <input
               required
-              type="text"
+              type="email"
+              autoComplete="email"
+              disabled={isEditing}
               className="ui-field w-full px-3 py-2 rounded-lg border border-control-line focus:ring-2 focus:ring-brand outline-none bg-surface"
               value={form.username}
               onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
              id="mf-usermanager-2" />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-muted uppercase mb-1" htmlFor="mf-usermanager-3" >
-              Senha {isEditing && <span className="text-muted font-normal normal-case">(em branco = não altera)</span>}
-            </label>
-            <input
-              required={!isEditing}
-              type="password"
-              className="ui-field w-full px-3 py-2 rounded-lg border border-control-line focus:ring-2 focus:ring-brand outline-none bg-surface"
-              value={form.password}
-              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-             id="mf-usermanager-3" />
           </div>
 
           <div>

@@ -17,9 +17,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - run: npm run lint:cloudflare
       - run: npm run lint:server
       - run: npm test
+      - run: npm run test:workers
       - run: npm run test:integration
       - run: npm run build
+      - run: npm run build:cloudflare
       - run: docker build -t magisform:ci .
       - run: docker build -f Dockerfile.manager -t magisform-manager:ci .

@@ -23,5 +23,5 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "exclude": []
+  "exclude": ["cloudflare/**", "wrangler.jsonc"]
 }

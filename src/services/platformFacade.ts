@@ -4,7 +4,10 @@ import type { PublicConfigDto } from '../../shared/contracts';
 export const platform = {
   brand: {
     publicConfig: async (): Promise<PublicConfigDto | null> => {
-      const response = await fetch('/api/v1/public-config', { credentials: 'same-origin' });
+      const pathname = typeof window !== 'undefined' ? window.location?.pathname ?? '' : '';
+      const match = pathname.match(/^\/t\/([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\/|$)/);
+      const prefix = match ? `/t/${match[1]}/api/v1` : '/api/v1';
+      const response = await fetch(`${prefix}/public-config`, { credentials: 'same-origin' });
       return response.ok ? (await response.json()).data : null;
     },
   },

@@ -82,7 +82,7 @@ export interface SavedFormulaDto {
   budget_items?: BudgetItemDto[];
 }
 
-export interface UserInputDto { name: string; username: string; password: string; role: UserRole }
+export interface UserInputDto { name: string; username: string; role: UserRole }
 export interface CustomerInputDto { name: string; phone: string | null; responsible_customer_id?: number | null }
 export interface FormulaInputDto {
   customer_id: number;
@@ -104,7 +104,6 @@ export interface SavedFormulaInputDto {
   items: Array<{ insumo_id: number; quantity: number; unit?: string }>;
   budget_items: Array<{ quantity: number; unit: string; value: number }>;
 }
-export interface AdminCredentialsDto { username: string; password: string }
 export interface LogFiltersDto {
   userId?: number; action?: string; entity?: string; from?: string; to?: string;
   search?: string; page?: number; pageSize?: number;
@@ -170,11 +169,11 @@ export interface SessionStateDto {
 }
 
 export interface BusinessOperations {
-  users: { list(): Promise<UserDto[]>; add(input: UserInputDto): Promise<OperationResultDto>; update(id: number, input: Partial<UserInputDto>): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
-  customers: { list(): Promise<CustomerDto[]>; add(input: CustomerInputDto): Promise<OperationResultDto>; update(id: number, input: Partial<CustomerInputDto>): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
-  insumos: { list(): Promise<InsumoDto[]>; add(name: string): Promise<OperationResultDto>; update(id: number, name: string): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
-  formulas: { list(query: FormulaListQueryDto): Promise<FormulaListPageDto>; get(id: number): Promise<FormulaDto | null>; summary(month: number, year: number, paymentStatus?: SummaryPaymentStatus, activity?: 'user' | 'passive'): Promise<FormulaSummaryDto>; add(input: FormulaInputDto): Promise<OperationResultDto>; update(id: number, input: FormulaInputDto): Promise<OperationResultDto>; updateStatus(id: number, status: string): Promise<OperationResultDto>; updatePayment(id: number, payment: FormulaPaymentUpdate): Promise<OperationResultDto>; updateDeliveryStatus(id: number, status: string): Promise<OperationResultDto>; verify(id: number): Promise<OperationResultDto>; unverify(id: number): Promise<OperationResultDto>; updateDeliveriesStatus(ids: number[], status: string): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
-  savedFormulas: { list(): Promise<SavedFormulaDto[]>; add(input: SavedFormulaInputDto): Promise<OperationResultDto>; update(id: number, input: SavedFormulaInputDto): Promise<OperationResultDto>; remove(id: number, credentials?: AdminCredentialsDto): Promise<OperationResultDto> };
+  users: { list(): Promise<UserDto[]>; add(input: UserInputDto): Promise<OperationResultDto>; update(id: number, input: Partial<UserInputDto>): Promise<OperationResultDto>; remove(id: number): Promise<OperationResultDto> };
+  customers: { list(): Promise<CustomerDto[]>; add(input: CustomerInputDto): Promise<OperationResultDto>; update(id: number, input: Partial<CustomerInputDto>): Promise<OperationResultDto>; remove(id: number): Promise<OperationResultDto> };
+  insumos: { list(): Promise<InsumoDto[]>; add(name: string): Promise<OperationResultDto>; update(id: number, name: string): Promise<OperationResultDto>; remove(id: number): Promise<OperationResultDto> };
+  formulas: { list(query: FormulaListQueryDto): Promise<FormulaListPageDto>; get(id: number): Promise<FormulaDto | null>; summary(month: number, year: number, paymentStatus?: SummaryPaymentStatus, activity?: 'user' | 'passive'): Promise<FormulaSummaryDto>; add(input: FormulaInputDto): Promise<OperationResultDto>; update(id: number, input: FormulaInputDto): Promise<OperationResultDto>; updateStatus(id: number, status: string): Promise<OperationResultDto>; updatePayment(id: number, payment: FormulaPaymentUpdate): Promise<OperationResultDto>; updateDeliveryStatus(id: number, status: string): Promise<OperationResultDto>; verify(id: number): Promise<OperationResultDto>; unverify(id: number): Promise<OperationResultDto>; updateDeliveriesStatus(ids: number[], status: string): Promise<OperationResultDto>; remove(id: number): Promise<OperationResultDto> };
+  savedFormulas: { list(): Promise<SavedFormulaDto[]>; add(input: SavedFormulaInputDto): Promise<OperationResultDto>; update(id: number, input: SavedFormulaInputDto): Promise<OperationResultDto>; remove(id: number): Promise<OperationResultDto> };
   logs: { list(filters?: LogFiltersDto): Promise<LogPageDto> };
 }
 
@@ -188,7 +187,7 @@ export interface PlatformOperations {
 }
 export interface SessionOperations {
   current(): Promise<SessionStateDto>;
-  login(username: string, password: string, force?: boolean): Promise<OperationResultDto>;
+  login(force?: boolean): Promise<OperationResultDto>;
   logout(): Promise<void>;
   heartbeat(): Promise<SessionStateDto>;
 }
