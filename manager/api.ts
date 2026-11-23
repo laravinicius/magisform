@@ -77,7 +77,6 @@ export async function buildManagerApi({ config, control, operator: suppliedOpera
     if (!response.ok || result.data === undefined) throw Object.assign(new Error(response.ok ? 'Resposta inválida do executor.' : (result.error ?? 'Executor indisponível.')), { statusCode: response.status === 401 ? 503 : response.status });
     return result.data;
   };
-  const requireControl = () => { if (!control) throw new Error('Executor de instalações indisponível.'); return control; };
 
   app.get('/api/manager/v1/auth/csrf', async (_request, reply) => {
     const token = randomBytes(32).toString('base64url'); reply.setCookie(csrfCookie, token, cookieOpts(config.secure)); return { data: { csrfToken: token } };

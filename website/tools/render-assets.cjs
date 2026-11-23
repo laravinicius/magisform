@@ -7,15 +7,19 @@ const root = path.resolve(__dirname, '..');
   const images = path.join(root, 'assets/images');
   const brand = path.join(root, 'assets/brand');
   const dimensions = new Map();
-  const captures = ['formulas', 'dashboard', 'recipe', 'withdrawal', 'payment', 'budget', 'customers', 'history',
+  const responsiveCaptures = ['formulas', 'payment', 'budget',
     'dashboard-detail', 'formulas-detail', 'withdrawal-detail', 'customers-detail', 'history-detail'];
-  for (const name of captures) {
+  for (const name of responsiveCaptures) {
     for (const width of [960, 1600]) {
       const source = path.join(images, `sources/${name}.png`);
       const info = await sharp(source).resize(width).webp({quality: 88}).toFile(path.join(images, `${name}-${width}.webp`));
       dimensions.set(`assets/images/${name}-${width}.webp`, info);
       await sharp(source).resize(width).avif({quality: 65, effort: 4}).toFile(path.join(images, `${name}-${width}.avif`));
     }
+  }
+  for (const name of ['dashboard', 'recipe', 'withdrawal', 'customers', 'history']) {
+    const source = path.join(images, `sources/${name}.png`);
+    await sharp(source).resize(1600).webp({quality: 88}).toFile(path.join(images, `${name}-1600.webp`));
   }
   // Reserva no HTML a proporção exata de cada captura, inclusive os recortes.
   const htmlPath = path.join(root, 'index.html');

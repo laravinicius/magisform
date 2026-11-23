@@ -7,17 +7,79 @@ import { useData } from '../hooks/useData';
 import { useFormDraft } from '../context/FormDraftContext';
 import { LoadingState, ErrorState } from './Feedback';
 import { AdminAuthModal } from './AdminAuthModal';
+import { AuditLogs } from './AuditLogs';
 import { COLORS } from '../../config/branding';
 import { canManageUsers, USER_ROLE_LABELS, UserRole } from '../types';
 
+const ADMIN_TABS = [
+  { id: 'users', label: 'Usuários' },
+  { id: 'logs', label: 'Logs' },
+] as const;
+
 export function AdminPanel({ user }: { user: User }) {
+  const [activeTab, setActiveTab] = useState<(typeof ADMIN_TABS)[number]['id']>('users');
+
+  const handleTabKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    let nextTab: typeof activeTab;
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowRight':
+        nextTab = activeTab === 'users' ? 'logs' : 'users';
+        break;
+      case 'Home':
+        nextTab = 'users';
+        break;
+      case 'End':
+        nextTab = 'logs';
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    setActiveTab(nextTab);
+    event.currentTarget.querySelector<HTMLButtonElement>(`#admin-tab-${nextTab}`)?.focus();
+  };
+
   return (
-    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-6">
-      <div className="ui-panel bg-surface rounded-2xl border border-line  overflow-hidden">
-        {canManageUsers(user.role)
-          ? <UserManager user={user} />
-          : <p className="p-6 text-sm text-muted">Somente perfis Farmacêutico, Gerente ou Administrador podem gerenciar usuários.</p>}
-      </div>
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="flex flex-col gap-6">
+      {canManageUsers(user.role) ? (
+        <>
+          <h2 className="ui-page-title text-3xl font-medium text-ink">Administração</h2>
+          <div role="tablist" aria-label="Administração" className="flex items-center gap-4 border-b border-line" onKeyDown={handleTabKeyDown}>
+            {ADMIN_TABS.map(({ id, label }) => (
+              <button
+                key={id}
+                id={`admin-tab-${id}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === id}
+                aria-controls={`admin-panel-${id}`}
+                tabIndex={activeTab === id ? 0 : -1}
+                onClick={() => setActiveTab(id)}
+                className={`ui-button relative px-2 pb-4 text-sm font-medium ${
+                  activeTab === id ? 'text-brand' : 'text-muted hover:text-ink'
+                }`}
+              >
+                {label}
+                {activeTab === id && (
+                  <motion.span layoutId="activeAdminTab" className="absolute inset-x-0 bottom-0 h-0.5 bg-brand" />
+                )}
+              </button>
+            ))}
+          </div>
+          <div id="admin-panel-users" role="tabpanel" aria-labelledby="admin-tab-users" tabIndex={0}
+            hidden={activeTab !== 'users'} className="ui-panel overflow-hidden rounded-2xl">
+            <UserManager user={user} />
+          </div>
+          <div id="admin-panel-logs" role="tabpanel" aria-labelledby="admin-tab-logs" tabIndex={0} hidden={activeTab !== 'logs'}>
+            <AuditLogs />
+          </div>
+        </>
+      ) : (
+        <div className="ui-panel rounded-2xl">
+          <p className="p-6 text-sm text-muted">Somente perfis Farmacêutico, Gerente ou Administrador podem gerenciar usuários.</p>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -26,6 +88,7 @@ export function UserManager({ user }: { user: User }) {
   const { data: users, loading, error, reload } = useData('users', activity => db.users.list(activity));
   const emptyForm = { name: '', username: '', role: 'employee' as UserRole };
   const [form, setForm] = useState(emptyForm);
+  const [password, setPassword] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
@@ -55,6 +118,7 @@ export function UserManager({ user }: { user: User }) {
 
   const reset = () => {
     setForm(emptyForm);
+    setPassword('');
     setEditingId(null);
     setFormError('');
   };
@@ -78,6 +142,7 @@ export function UserManager({ user }: { user: User }) {
           name: form.name.trim(),
           username: form.username.trim(),
           role: form.role,
+          ...(password ? { password } : {}),
         });
         if (res && res.success === false) {
           setFormError(res.error ?? 'Erro ao salvar. Tente novamente.');
@@ -88,6 +153,7 @@ export function UserManager({ user }: { user: User }) {
           name: form.name.trim(),
           username: form.username.trim(),
           role: form.role,
+          password,
         });
         if (res && res.success === false) {
           setFormError(res.error ?? 'Erro ao salvar. Tente novamente.');
@@ -113,15 +179,16 @@ export function UserManager({ user }: { user: User }) {
     setDeleteModalOpen(true);
   };
 
-  const handleDeleteConfirm = async () => {
+  const handleDeleteConfirm = async (credentials: { username: string; password: string }) => {
     if (pendingDeleteId === null) return;
     try {
-      const res: any = await db.users.remove(pendingDeleteId);
-      if (res?.success === false) { setFormError(res.error ?? 'Erro ao excluir.'); return; }
+      const res: any = await db.users.remove(pendingDeleteId, credentials);
+      if (res?.success === false) throw new Error(res.error ?? 'Erro ao excluir.');
       reload();
       setPendingDeleteId(null);
     } catch (err: any) {
       setFormError(err?.message ?? 'Erro ao excluir.');
+      throw err;
     }
   };
 
@@ -156,17 +223,18 @@ export function UserManager({ user }: { user: User }) {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-muted uppercase mb-1" htmlFor="mf-usermanager-2" >E-mail autorizado</label>
+            <label className="block text-xs font-semibold text-muted uppercase mb-1" htmlFor="mf-usermanager-2" >Usuário</label>
             <input
               required
-              type="email"
-              autoComplete="email"
-              disabled={isEditing}
+              type="text"
+              autoComplete="off"
               className="ui-field w-full px-3 py-2 rounded-lg border border-control-line focus:ring-2 focus:ring-brand outline-none bg-surface"
               value={form.username}
               onChange={e => setForm(f => ({ ...f, username: e.target.value }))}
              id="mf-usermanager-2" />
           </div>
+
+          <div><label className="block text-xs font-semibold text-muted uppercase mb-1" htmlFor="mf-usermanager-password">{isEditing ? 'Nova senha (opcional)' : 'Senha inicial'}</label><input id="mf-usermanager-password" type="password" required={!isEditing} minLength={8} maxLength={255} autoComplete="new-password" className="ui-field w-full px-3 py-2 rounded-lg border border-control-line bg-surface" value={password} onChange={e => setPassword(e.target.value)} /></div>
 
           <div>
             <label className="block text-xs font-semibold text-muted uppercase mb-1" htmlFor="mf-usermanager-4" >Cargo</label>

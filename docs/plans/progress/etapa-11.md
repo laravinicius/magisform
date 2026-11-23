@@ -39,6 +39,8 @@ A carga foi somente leitura após a preparação das fixtures; os testes de inte
 
 ## Automação adicionada
 
+Os scripts web desta etapa estão disponíveis no commit `c826db3`. Na versão atual, `npm run test:integration` cobre o fluxo de pedidos e `npm run test:docker` cobre provisionamento e isolamento.
+
 - `deploy/qa/stage11-fixtures.mjs`: prepara dois bancos sintéticos com 10.000 fórmulas, itens, orçamentos, clientes e contas de carga.
 - `deploy/qa/stage11-load.mjs`: perfis sustentados de 5/20 usuários, polling, p95 ponta a ponta, 5xx, CPU, memória e conexões.
 - `deploy/qa/stage11-server-metrics.mjs`: extrai p95/5xx do tempo de resposta do backend a partir de logs sem payload.

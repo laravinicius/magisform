@@ -49,10 +49,6 @@ export function totpAt(secret: string, timestampMs = Date.now()): string {
   return String(code).padStart(6, '0');
 }
 
-export function verifyTotp(secret: string, code: string, timestampMs = Date.now()): boolean {
-  return matchingTotpStep(secret, code, timestampMs) !== null;
-}
-
 export function matchingTotpStep(secret: string, code: string, timestampMs = Date.now()): number | null {
   if (!/^\d{6}$/.test(code)) return null;
   const currentStep = Math.floor(timestampMs / 30_000);

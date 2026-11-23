@@ -1,4 +1,4 @@
-import type { BusinessOperations, ErrorEnvelopeDto, OperationResultDto, FormulaListQueryDto } from '../../shared/contracts';
+import type { BusinessOperations, ErrorEnvelopeDto, OperationResultDto, OrderDataDto, OrderDto, PartnerPharmacyDto, PartnerPatientDto } from '../../shared/contracts';
 import type { DataActivity } from './lanDatabase';
 type LoginResultDto = OperationResultDto;
 
@@ -53,9 +53,9 @@ const idPath = (base: string, id: number) => `${base}/${encodeURIComponent(id)}`
 
 export const httpBusinessAdapter = {
   auth: {
-    async login(force = false): Promise<LoginResultDto> {
+    async login(force = false, credentials?: { username: string; password: string }): Promise<LoginResultDto> {
       try {
-        const response = await request<{ user: LoginResultDto['user'] }>('/auth/login', 'POST', { force });
+        const response = await request<{ user: LoginResultDto['user'] }>('/auth/login', 'POST', { force, ...credentials });
         clearWebResources();
         return { success: true, user: response.user };
       } catch (error) {
@@ -84,43 +84,32 @@ export const httpBusinessAdapter = {
     onSessionChanged: subscribeWebSession,
     sessionGeneration: getWebSessionGeneration,
   },
+  partners: {
+    list: (activity: DataActivity = 'user') => request<PartnerPharmacyDto[]>('/partners', 'GET', undefined, activity),
+    add: (name: string) => result(request('/partners', 'POST', { name }, 'user')),
+    addUser: (id: number, input: { name: string; username: string; password: string }) => result(request(`${idPath('/partners', id)}/users`, 'POST', input, 'user')),
+    updateUser: (id: number, input: { active?: boolean; password?: string }) => result(request(idPath('/partner-users', id), 'PATCH', input, 'user')),
+  },
+  orders: {
+    list: (activity: DataActivity = 'user') => request<OrderDto[]>('/orders', 'GET', undefined, activity),
+    get: (id: number, activity: DataActivity = 'user') => request<OrderDto>(idPath('/orders', id), 'GET', undefined, activity),
+    patients: (activity: DataActivity = 'user') => request<PartnerPatientDto[]>('/order-patients', 'GET', undefined, activity),
+    insumos: (activity: DataActivity = 'user') => request<Array<{ id: number; name: string }>>('/order-insumos', 'GET', undefined, activity),
+    add: (input: OrderDataDto) => result(request('/orders', 'POST', input, 'user')),
+    transition: (id: number, action: 'review' | 'accept' | 'approve' | 'reject', revision: number, note?: string) => result(request(`${idPath('/orders', id)}/${action}`, 'POST', { revision, note }, 'user')),
+    propose: (id: number, revision: number, input: OrderDataDto, note?: string) => result(request(`${idPath('/orders', id)}/propose`, 'POST', { revision, data: input, note }, 'user')),
+  },
   users: {
     list: (activity: DataActivity = 'user') => request<Awaited<ReturnType<BusinessOperations['users']['list']>>>('/users', 'GET', undefined, activity),
     add: (input: Parameters<BusinessOperations['users']['add']>[0]) => result(request('/users', 'POST', input, 'user')),
     update: (id: number, input: Parameters<BusinessOperations['users']['update']>[1]) => result(request(idPath('/users', id), 'PATCH', input, 'user')),
-    remove: (id: number) => result(request(idPath('/users', id), 'DELETE', {}, 'user')),
-  },
-  customers: {
-    list: (activity: DataActivity = 'user') => request<Awaited<ReturnType<BusinessOperations['customers']['list']>>>('/customers', 'GET', undefined, activity),
-    add: (input: Parameters<BusinessOperations['customers']['add']>[0]) => result(request('/customers', 'POST', input, 'user')),
-    update: (id: number, input: Parameters<BusinessOperations['customers']['update']>[1]) => result(request(idPath('/customers', id), 'PATCH', input, 'user')),
-    remove: (id: number) => result(request(idPath('/customers', id), 'DELETE', {}, 'user')),
+    remove: (id: number, credentials: { username: string; password: string }) => result(request(idPath('/users', id), 'DELETE', credentials, 'user')),
   },
   insumos: {
     list: (activity: DataActivity = 'user') => request<Awaited<ReturnType<BusinessOperations['insumos']['list']>>>('/insumos', 'GET', undefined, activity),
     add: (name: string) => result(request('/insumos', 'POST', name, 'user')),
     update: (id: number, name: string) => result(request(idPath('/insumos', id), 'PATCH', name, 'user')),
-    remove: (id: number) => result(request(idPath('/insumos', id), 'DELETE', {}, 'user')),
-  },
-  formulas: {
-    list: (filters: FormulaListQueryDto, activity: DataActivity = 'user') => { const query = new URLSearchParams(); query.set('limit', String(filters.limit)); if (filters.cursor) query.set('cursor', filters.cursor); if (filters.statuses?.length) query.set('statuses', filters.statuses.join(',')); if (filters.deliveryStatus) query.set('deliveryStatus', filters.deliveryStatus); if (filters.search) query.set('search', filters.search); return request<Awaited<ReturnType<BusinessOperations['formulas']['list']>>>(`/formulas?${query}`, 'GET', undefined, activity); },
-    get: (id: number) => request<Awaited<ReturnType<BusinessOperations['formulas']['get']>>>(idPath('/formulas', id), 'GET'),
-    summary: (month: number, year: number, paymentStatus: import('../../shared/contracts').SummaryPaymentStatus = 'pago', activity: DataActivity = 'user') => request<Awaited<ReturnType<BusinessOperations['formulas']['summary']>>>(`/formulas-summary?month=${month}&year=${year}&paymentStatus=${paymentStatus}`, 'GET', undefined, activity),
-    add: (input: Parameters<BusinessOperations['formulas']['add']>[0]) => result(request('/formulas', 'POST', input, 'user')),
-    update: (id: number, input: Parameters<BusinessOperations['formulas']['update']>[1]) => result(request(idPath('/formulas', id), 'PATCH', input, 'user')),
-    updateStatus: (id: number, status: string) => result(request(`${idPath('/formulas', id)}/status`, 'PATCH', { status }, 'user')),
-    updateDeliveryStatus: (id: number, status: string) => result(request(`${idPath('/formulas', id)}/delivery-status`, 'PATCH', { status }, 'user')),
-    updatePayment: (id: number, payment: import('../../shared/contracts').FormulaPaymentUpdate) => result(request(`${idPath('/formulas', id)}/payment`, 'PATCH', payment, 'user')),
-    verify: (id: number) => result(request(`${idPath('/formulas', id)}/verification`, 'POST', {}, 'user')),
-    unverify: (id: number) => result(request(`${idPath('/formulas', id)}/verification`, 'DELETE', undefined, 'user')),
-    updateDeliveriesStatus: (ids: number[], status: string) => result(request('/formulas/delivery-status-batch', 'PATCH', { ids, status }, 'user')),
-    remove: (id: number) => result(request(idPath('/formulas', id), 'DELETE', {}, 'user')),
-  },
-  savedFormulas: {
-    list: (activity: DataActivity = 'user') => request<Awaited<ReturnType<BusinessOperations['savedFormulas']['list']>>>('/saved-formulas', 'GET', undefined, activity),
-    add: (input: Parameters<BusinessOperations['savedFormulas']['add']>[0]) => result(request('/saved-formulas', 'POST', input, 'user')),
-    update: (id: number, input: Parameters<BusinessOperations['savedFormulas']['update']>[1]) => result(request(idPath('/saved-formulas', id), 'PATCH', input, 'user')),
-    remove: (id: number) => result(request(idPath('/saved-formulas', id), 'DELETE', {}, 'user')),
+    remove: (id: number, credentials: { username: string; password: string }) => result(request(idPath('/insumos', id), 'DELETE', credentials, 'user')),
   },
   logs: { list: (filters?: Parameters<BusinessOperations['logs']['list']>[0], activity: DataActivity = 'user') => { const query = new URLSearchParams(); for (const [key, value] of Object.entries(filters ?? {})) if (value !== undefined && value !== '') query.set(key, String(value)); return request<Awaited<ReturnType<BusinessOperations['logs']['list']>>>(`/logs${query.size ? `?${query}` : ''}`, 'GET', undefined, activity); } },
   data: { onChanged: (listener: () => void) => { changeListeners.add(listener); return () => changeListeners.delete(listener); } },

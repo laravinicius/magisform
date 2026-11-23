@@ -88,15 +88,6 @@
   .ui-search-highlight { background: var(--mf-sage); color: var(--mf-secondary); }
   .ui-login { justify-content: safe center; overflow-y: auto; padding-block: 32px; }
   .ui-login-card { flex-shrink: 0; }
-  .ui-stat-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
-  .ui-stat { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
-  .ui-icon-disc { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--mf-sage); color: var(--mf-secondary); }
-  .ui-quick-action { min-height: 112px; padding: 20px 12px; }
-  .ui-split-grid { grid-template-columns: minmax(0, 1fr); }
-  .ui-formula-scroll { overflow-x: auto; padding: 3px; }
-  .ui-formula-grid { min-width: 84rem; }
-  .ui-formula-grid-pending { min-width: 66rem; }
-  .ui-row { border-radius: 12px; }
 }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -110,101 +101,8 @@
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
 
-@container (min-width: 44rem) {
-  .ui-split-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-
 .ui-sidebar > div, .ui-sidebar nav { padding-inline: 16px; }
 .ui-sidebar .ui-nav { padding: 10px 12px; gap: 10px; }
 .ui-sidebar[data-collapsed="true"] > div, .ui-sidebar[data-collapsed="true"] nav { padding-inline: 8px; }
 .ui-sidebar[data-collapsed="true"] .ui-button { padding-inline: 0; justify-content: center; }
 .ui-sidebar[data-collapsed="true"] .ui-user { padding: 8px; justify-content: center; }
-
-/* O Histórico acompanha a largura útil e a escala de fonte da aplicação. */
-.formula-history {
-  container: formula-history / inline-size;
-}
-
-.formula-history-header {
-  display: none;
-}
-
-.formula-history-row > *,
-.formula-history-row > * > p,
-.formula-history-header > span {
-  overflow-wrap: anywhere;
-}
-
-.formula-history-row > [data-label="Quantidade"] > p,
-.formula-history-row > [data-label="Restante"] {
-  white-space: normal;
-}
-
-.formula-history-row button {
-  min-width: 0;
-  max-width: 100%;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.formula-history-row button > svg,
-.formula-history-row > [data-label="Ações"] > div {
-  flex-shrink: 0;
-}
-
-.formula-history-row > [data-label="Ações"] {
-  flex-wrap: wrap;
-}
-
-@container formula-history (width < 64rem) {
-  .formula-list-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .formula-list-tools,
-  .formula-list-search {
-    min-width: 0;
-  }
-
-  .formula-list-search {
-    flex: 1;
-  }
-
-  .formula-list-search input {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .formula-history-row > [data-label] {
-    display: block;
-    white-space: normal;
-    text-align: left;
-  }
-
-  .formula-history-row > [data-label]::before {
-    content: attr(data-label);
-    display: block;
-    margin-bottom: 0.25rem;
-    color: var(--mf-muted);
-    font-size: 0.75rem;
-    font-weight: 600;
-  }
-
-  .formula-history-row > [data-label="Ações"] {
-    display: flex;
-    justify-content: flex-start;
-  }
-
-  .formula-history-row > [data-label="Ações"]::before {
-    flex-basis: 100%;
-  }
-}
-
-@container formula-history (width >= 64rem) {
-  .formula-history-header,
-  .formula-history-row {
-    display: grid;
-    grid-template-columns: var(--formula-columns);
-  }
-}

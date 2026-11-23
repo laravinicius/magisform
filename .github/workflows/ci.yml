@@ -4,6 +4,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -19,10 +20,12 @@ jobs:
       - run: npm run lint
       - run: npm run lint:cloudflare
       - run: npm run lint:server
+      - run: python3 -m unittest discover -s tests -p 'update_standalone_test.py'
+      - run: npm run test:release
       - run: npm test
-      - run: npm run test:workers
       - run: npm run test:integration
       - run: npm run build
       - run: npm run build:cloudflare
       - run: docker build -t magisform:ci .
       - run: docker build -f Dockerfile.manager -t magisform-manager:ci .
+      - run: python3 scripts/test-update-standalone.py

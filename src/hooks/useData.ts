@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { db, type DataActivity } from '../services/lanDatabase';
 
-interface PerfMetrics { httpDurationMs: number; reloadCount: number; sqlQueryCount: number; recordsReturned: number; concurrentLoads: number; lastError: string | null }
-const globalMetrics: PerfMetrics = { httpDurationMs: 0, reloadCount: 0, sqlQueryCount: 0, recordsReturned: 0, concurrentLoads: 0, lastError: null };
-let activeLoads = 0;
-export function getPerfMetrics(): PerfMetrics { return { ...globalMetrics }; }
-export function resetPerfMetrics(): void { Object.assign(globalMetrics, { httpDurationMs: 0, reloadCount: 0, sqlQueryCount: 0, recordsReturned: 0, concurrentLoads: 0, lastError: null }); activeLoads = 0; }
-
 interface Resource<T> { data: T | null; loading: boolean; error: string | null; subscribers: Set<() => void>; inFlight: Promise<T> | null; timer: ReturnType<typeof setTimeout> | null; unlisten: (() => void) | null; failures: number }
 const resources = new Map<string, Resource<any>>();
 function resource<T>(key: string): Resource<T> {
@@ -18,23 +12,17 @@ function notify<T>(entry: Resource<T>) { entry.subscribers.forEach(listener => l
 async function load<T>(entry: Resource<T>, fetcher: (activity: DataActivity) => Promise<T>, silent: boolean, activity: DataActivity): Promise<T | null> {
   if (entry.inFlight) return entry.inFlight;
   if (!silent) { entry.loading = true; notify(entry); }
-  activeLoads++;
-  const started = performance.now();
   entry.inFlight = (async () => {
     try {
       const data = await fetcher(activity);
       entry.failures = 0;
-      globalMetrics.httpDurationMs += performance.now() - started;
-      globalMetrics.reloadCount++;
-      globalMetrics.lastError = null;
-      globalMetrics.recordsReturned += Array.isArray(data) ? data.length : data && typeof data === 'object' ? 1 : 0;
       entry.data = data; entry.error = null; entry.loading = false; notify(entry);
       return data;
     } catch (error) {
       entry.failures = Math.min(entry.failures + 1, 6);
       const message = error instanceof Error ? error.message : 'Erro desconhecido';
-      globalMetrics.lastError = message; entry.error = message; entry.loading = false; notify(entry); throw error;
-    } finally { activeLoads--; globalMetrics.concurrentLoads = Math.max(globalMetrics.concurrentLoads, activeLoads); entry.inFlight = null; }
+      entry.error = message; entry.loading = false; notify(entry); throw error;
+    } finally { entry.inFlight = null; }
   })();
   return entry.inFlight;
 }
@@ -82,7 +70,7 @@ export function useData<T>(key: string, fetcher: (activity: DataActivity) => Pro
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resourceKey, forceUpdate]);
   const entry = resources.get(resourceKey) as Resource<T> | undefined;
-  const reload = useCallback(async (silent = false) => { const current = resources.get(resourceKey) as Resource<T> | undefined; if (current) await load(current, fetcher, silent, 'user'); }, [resourceKey, ...deps]);
+  const reload = useCallback(async (silent = false, activity: DataActivity = 'user') => { const current = resources.get(resourceKey) as Resource<T> | undefined; if (current) await load(current, fetcher, silent, activity); }, [resourceKey, ...deps]);
   useEffect(() => { void reload().catch(() => {}); }, [reload]);
   return { data: entry?.data ?? null, loading: entry?.loading ?? true, error: entry?.error ?? null, reload };
 }

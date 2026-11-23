@@ -109,15 +109,19 @@ const upgrades = [
   '001-password-session-expansion.sql',
   '002-formula-pagination-order.sql',
   '003-formula-authorship-units.sql',
+  '004-partner-orders.sql',
+  '005-order-foundation.sql',
 ];
 // Snapshot de bootstrap publicado antes do schema v3; normalizado em LF.
 const previousBootstrapChecksum = '6438d5e84358613e4a638d40f6e8da9055248bed4779800479a92b5fde6dfbf9';
+const bootstrapV3Checksum = '23be321bd34ab098e3ce350b6fb67cdd334c6d688299bd85511c0fc7c0b03dc5';
+const bootstrapV4Checksum = 'c755662a82ec5d5c242a4d26a6fa01fb9af1afcb9d29b1635def138508d10888';
 async function validateVersion(conn, row, allowInterrupted = false) {
   const version = Number(row.version);
-  if (!Number.isInteger(version) || version < (allowInterrupted ? 0 : 1) || version > 3) throw new Error('Schema incompatível com o executor v3.');
+  if (!Number.isInteger(version) || version < (allowInterrupted ? 0 : 1) || version > 5) throw new Error('Schema incompatível com o executor v5.');
   const schema = await fs.readFile(path.join(root, 'database.sql'), 'utf8');
   if (row.source === 'bootstrap') {
-    const expected = version === 3 ? checksum(schema) : previousBootstrapChecksum;
+    const expected = version === 5 ? checksum(schema) : version === 4 ? bootstrapV4Checksum : version === 3 ? bootstrapV3Checksum : previousBootstrapChecksum;
     if (row.checksum !== expected) throw new Error('Checksum de bootstrap divergente.');
   } else if (row.source === 'upgrade') {
     const sql = await fs.readFile(path.join(root, 'database/upgrades', upgrades[Math.max(1,version)-1]), 'utf8');
@@ -127,24 +131,87 @@ async function validateVersion(conn, row, allowInterrupted = false) {
       if (history.length !== 1 || history[0].checksum !== row.checksum) throw new Error('Histórico de upgrade incompleto ou divergente.');
     }
   } else throw new Error('Origem de schema desconhecida.');
-  await assertKnownLegacy(conn, version);
+  const existingTables = await tableNames(conn);
+  let transitioning = false;
+  if (existingTables.has('schema_upgrade_progress')) {
+    const progressColumns = await columns(conn, 'schema_upgrade_progress');
+    if (!['version', 'checksum', 'started_at'].every(name => progressColumns.has(name))) throw new Error('Metadados de upgrade incompatíveis.');
+    const [progress] = await conn.query('SELECT version,checksum FROM schema_upgrade_progress');
+    if (progress.length) {
+      const expected = checksum(await fs.readFile(path.join(root, 'database/upgrades/005-order-foundation.sql'), 'utf8'));
+      if (progress.length !== 1 || version !== 4 || Number(progress[0].version) !== 5 || progress[0].checksum !== expected) throw new Error('Upgrade interrompido desconhecido.');
+      transitioning = true;
+    }
+  }
+  if (version < 5 && !transitioning) await assertKnownLegacy(conn, version);
+  if (version === 5 || transitioning) {
+    const base = { users: ['id','name','username','password','role'], insumos: ['id','name'], sessions: ['id','user_id','token','policy','expires_at','absolute_expires_at'], action_logs: ['id','user_id','user_name','action','entity','entity_id','created_at'] };
+    for (const [table, names] of Object.entries(base)) {
+      if (!existingTables.has(table)) throw new Error('Estrutura de base incompatível.');
+      const actual = await columns(conn, table);
+      if (!names.every(name => actual.has(name))) throw new Error('Estrutura de base incompatível.');
+    }
+    const baseTables = Object.keys(base);
+    const [baseEngines] = await conn.execute(`SELECT engine FROM information_schema.tables WHERE table_schema=? AND table_name IN (${baseTables.map(() => '?').join(',')})`, [database, ...baseTables]);
+    if (baseEngines.length !== baseTables.length || baseEngines.some(row => String(row.ENGINE ?? row.engine).toLowerCase() !== 'innodb')) throw new Error('Tabelas de base precisam usar InnoDB.');
+    if (version === 5 && (!existingTables.has('schema_upgrade_progress') || ['customers','formulas','formula_items','formula_budget_items','saved_formulas','saved_formula_items','saved_formula_budget_items','budget_number_registry'].some(name => existingTables.has(name)))) throw new Error('Estrutura anterior ainda presente.');
+  }
   if (version > 0) {
     const sessionColumns = await columns(conn, 'sessions');
     if (!['policy','expires_at','absolute_expires_at'].every(name => sessionColumns.has(name))) throw new Error('Estrutura de sessões incompatível.');
   }
-  if (version >= 2) {
+  if (version >= 2 && version < 5 && !transitioning) {
     const [indexes] = await conn.query("SHOW INDEX FROM formulas WHERE Key_name='idx_formulas_created_id'");
     if (indexes.length !== 2 || indexes[0].Column_name !== 'created_at' || indexes[1].Column_name !== 'id') throw new Error('Índice de paginação incompatível.');
   }
-  for (const table of ['formulas','saved_formulas']) {
+  for (const table of (version < 5 && !transitioning ? ['formulas','saved_formulas'] : [])) {
     const column = (await columns(conn,table)).get('created_by_name');
-    if ((version === 3 && !column) || (column && String(column.COLUMN_TYPE ?? column.column_type).toLowerCase() !== 'varchar(255)')) throw new Error('Estrutura de autoria incompatível.');
+    if ((version >= 3 && !column) || (column && String(column.COLUMN_TYPE ?? column.column_type).toLowerCase() !== 'varchar(255)')) throw new Error('Estrutura de autoria incompatível.');
   }
-  for (const table of ['formula_budget_items','saved_formula_budget_items']) {
+  for (const table of (version < 5 && !transitioning ? ['formula_budget_items','saved_formula_budget_items'] : [])) {
     const column = (await columns(conn,table)).get('unit');
     const type = String(column?.COLUMN_TYPE ?? column?.column_type).toLowerCase();
-    if (!(version === 3 ? ['varchar(16)'] : ['varchar(5)','varchar(16)']).includes(type)) throw new Error('Estrutura de unidades incompatível.');
+    if (!(version >= 3 ? ['varchar(16)'] : ['varchar(5)','varchar(16)']).includes(type)) throw new Error('Estrutura de unidades incompatível.');
   }
+  {
+    const required = {
+      partner_pharmacies: ['id', 'name', 'created_at'],
+      partner_memberships: ['user_id', 'pharmacy_id', 'active'],
+      partner_patients: ['id', 'pharmacy_id', 'name', 'phone'],
+      orders: ['id', 'pharmacy_id', ...(version < 5 && !transitioning ? ['legacy_formula_id'] : []), 'status', 'original_data', 'current_data', 'proposed_data', 'revision', 'created_at', 'updated_at'],
+      order_events: ['id', 'order_id', 'user_id', 'actor_name', 'action', 'snapshot', 'note', 'created_at'],
+    };
+    const existing = await tableNames(conn);
+    const present = Object.keys(required).filter(table => existing.has(table));
+    if (version >= 4 && present.length !== Object.keys(required).length) throw new Error('Estrutura de pedidos incompatível.');
+    for (const [table, names] of Object.entries(required)) {
+      if (!existing.has(table)) continue;
+      const actual = await columns(conn, table);
+      if (!names.every(name => actual.has(name))) throw new Error('Estrutura de pedidos incompatível.');
+      if (version === 5 && table === 'orders' && actual.has('legacy_formula_id')) throw new Error('Vínculo anterior ainda presente.');
+    }
+    if (present.length) {
+      const [engines] = await conn.execute(`SELECT engine FROM information_schema.tables WHERE table_schema=? AND table_name IN (${present.map(() => '?').join(',')})`, [database, ...present]);
+      if (engines.length !== present.length || engines.some(row => String(row.ENGINE ?? row.engine).toLowerCase() !== 'innodb')) throw new Error('Tabelas de pedidos precisam usar InnoDB.');
+      const foreignKeys = {
+        partner_memberships: [['user_id', 'users'], ['pharmacy_id', 'partner_pharmacies']],
+        partner_patients: [['pharmacy_id', 'partner_pharmacies']],
+        orders: [['pharmacy_id', 'partner_pharmacies'], ...(version < 5 && !transitioning ? [['legacy_formula_id', 'formulas']] : [])],
+        order_events: [['order_id', 'orders'], ['user_id', 'users']],
+      };
+      for (const [table, expected] of Object.entries(foreignKeys)) {
+        if (!existing.has(table)) continue;
+        const [keys] = await conn.execute('SELECT column_name,referenced_table_name FROM information_schema.key_column_usage WHERE table_schema=? AND table_name=? AND referenced_table_name IS NOT NULL', [database, table]);
+        if (!expected.every(([column, target]) => keys.some(key => (key.COLUMN_NAME ?? key.column_name) === column && (key.REFERENCED_TABLE_NAME ?? key.referenced_table_name) === target))) throw new Error('Vínculos de pedidos incompatíveis.');
+      }
+      for (const [table, index, columnsExpected] of [['partner_memberships', 'PRIMARY', ['user_id']], ['partner_patients', 'uq_partner_patient', ['pharmacy_id', 'name', 'phone']], ...(version < 5 && !transitioning ? [['orders', 'uq_order_legacy_formula', ['legacy_formula_id']]] : [])]) {
+        if (!existing.has(table)) continue;
+        const [keys] = await conn.execute('SELECT column_name,non_unique FROM information_schema.statistics WHERE table_schema=? AND table_name=? AND index_name=? ORDER BY seq_in_index', [database, table, index]);
+        if (keys.length !== columnsExpected.length || keys.some((key, i) => Number(key.NON_UNIQUE ?? key.non_unique) !== 0 || (key.COLUMN_NAME ?? key.column_name) !== columnsExpected[i])) throw new Error('Índices de pedidos incompatíveis.');
+      }
+    }
+  }
+  return transitioning;
 }
 
 async function createMetadata(conn, version, source, digest) {
@@ -190,8 +257,8 @@ async function runBootstrap() {
     await conn.changeUser({ database });
     const schema = await fs.readFile(path.join(root, 'database.sql'), 'utf8');
     for (const statement of statements(schema)) await conn.query(statement);
-    await createMetadata(conn, 3, 'bootstrap', checksum(schema));
-    console.log(`Bootstrap concluído: ${database}, schema v3. Nenhuma conta administrativa foi criada.`);
+    await createMetadata(conn, 5, 'bootstrap', checksum(schema));
+    console.log(`Bootstrap concluído: ${database}, schema v5. Nenhuma conta administrativa foi criada.`);
   } finally {
     try { await unlock(conn, lockName); } finally { await conn.end(); }
   }
@@ -212,8 +279,8 @@ async function runPreflight() {
     }
     const [rows] = await conn.execute('SELECT version, source, checksum FROM schema_version WHERE singleton = 1');
     if (rows.length !== 1) throw new Error('Preflight recusado: registro de versão ausente ou duplicado.');
-    await validateVersion(conn, rows[0]);
-    console.log(`Preflight: schema v${rows[0].version} válido (${rows[0].source}).`);
+    const transitioning = await validateVersion(conn, rows[0]);
+    console.log(transitioning ? 'Preflight: upgrade v5 interrompido; retomada explícita disponível.' : `Preflight: schema v${rows[0].version} válido (${rows[0].source}).`);
   } finally {
     await conn.end();
   }
@@ -236,13 +303,19 @@ async function runUpgrade() {
     if (versions.length !== 1) throw new Error('Upgrade recusado: metadados de versão inconsistentes.');
     await validateVersion(conn, versions[0], true);
     let current = Number(versions[0].version);
-    if (current === 3) {
-      console.log(`Upgrade ignorado: ${database} já está no schema v3 com checksum válido.`);
+    if (current === 5) {
+      console.log(`Upgrade ignorado: ${database} já está no schema v5 com checksum válido.`);
       return;
     }
-    for (let version = current + 1; version <= 3; version++) {
+    for (let version = current + 1; version <= 5; version++) {
       const sql = await fs.readFile(path.join(root, 'database/upgrades', upgrades[version-1]), 'utf8');
       const digest = checksum(sql);
+      if (version === 5) {
+        await conn.query('CREATE TABLE IF NOT EXISTS schema_upgrade_progress (version INT NOT NULL PRIMARY KEY, checksum CHAR(64) NOT NULL, started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB');
+        await conn.execute('INSERT INTO schema_upgrade_progress(version,checksum) VALUES(?,?) ON DUPLICATE KEY UPDATE version=version', [version, digest]);
+        const [progress] = await conn.execute('SELECT checksum FROM schema_upgrade_progress WHERE version=?', [version]);
+        if (progress.length !== 1 || progress[0].checksum !== digest) throw new Error('Checksum de upgrade interrompido divergente.');
+      }
       console.log(`Upgrade v${version} iniciado em ${database}; mantenha a aplicação em manutenção.`);
       for (const statement of statements(sql)) await conn.query(statement);
       // DDL e recuperacao sao idempotentes; metadados de conclusao usam transacao.
@@ -250,12 +323,13 @@ async function runUpgrade() {
       try {
         await conn.execute('INSERT INTO schema_upgrade_history (version, checksum) VALUES (?, ?) ON DUPLICATE KEY UPDATE checksum=VALUES(checksum), completed_at=CURRENT_TIMESTAMP', [version, digest]);
         await conn.execute("UPDATE schema_version SET version=?, source='upgrade', checksum=? WHERE singleton=1 AND version=?", [version, digest, version-1]);
+        if (version === 5) await conn.execute('DELETE FROM schema_upgrade_progress WHERE version=?', [version]);
         await conn.commit();
       } catch (error) { await conn.rollback(); throw error; }
     }
     const [finalRows] = await conn.execute('SELECT version,source,checksum FROM schema_version WHERE singleton=1');
     await validateVersion(conn, finalRows[0]);
-    console.log(`Upgrade concluído: ${database} agora está no schema v3.`);
+    console.log(`Upgrade concluído: ${database} agora está no schema v5.`);
   } finally {
     try { await unlock(conn, lockName); } finally { await conn.end(); }
   }

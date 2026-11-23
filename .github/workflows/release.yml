@@ -1,0 +1,51 @@
+name: Versão final
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: magisform-final-release
+  cancel-in-progress: false
+
+jobs:
+  validar:
+    uses: ./.github/workflows/ci.yml
+
+  publicar:
+    needs: validar
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Conferir versão e histórico
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          node scripts/check-release.mjs "$TAG"
+          git merge-base --is-ancestor HEAD origin/main
+      - name: Construir imagem da aplicação
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -o pipefail
+          docker build -t "magisform:release-${TAG}" -f Dockerfile .
+          docker save "magisform:release-${TAG}" | gzip -n > magisform-image.tar.gz
+          node scripts/create-release-manifest.mjs "$TAG" "$GITHUB_SHA" magisform-image.tar.gz
+      - name: Publicar release e imagem verificada
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes \
+            magisform-image.tar.gz magisform-release.json

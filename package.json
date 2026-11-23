@@ -2,7 +2,7 @@
   "name": "magisform",
   "private": true,
   "version": "0.2.8",
-  "description": "Aplicativo de gerenciamento de fórmulas farmacêuticas.",
+  "description": "Sistema de pedidos para farmácias de manipulação.",
   "author": "Vinicius Lara",
   "type": "module",
   "scripts": {
@@ -19,6 +19,8 @@
     "build:web": "vite build && node scripts/check-web-bundle.mjs",
     "preview": "vite preview",
     "clean": "node -e \"const fs=require('fs'); for (const dir of ['dist-web','dist-server','dist-manager']) fs.rmSync(dir, { recursive: true, force: true });\"",
+    "release:patch": "node scripts/release-patch.mjs",
+    "test:release": "node scripts/test-release-patch.mjs",
     "lint": "tsc --noEmit",
     "db:bootstrap": "node scripts/database-schema.mjs bootstrap",
     "db:preflight": "node scripts/database-schema.mjs preflight",
@@ -55,8 +57,6 @@
     "@tailwindcss/vite": "^4.1.14",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.4",
-    "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.12",
     "sharp": "^0.35.3",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.23.15",
@@ -64,9 +64,6 @@
     "vite": "^6.2.0",
     "vitest": "^3.2.7",
     "wrangler": "^4.152.0"
-  },
-  "allowScripts": {
-    "argon2@0.45.1": true
   },
   "engines": {
     "node": ">=20 <25"

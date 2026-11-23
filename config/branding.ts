@@ -5,7 +5,6 @@
 
 export const BRAND = {
   name: 'MagisForm',
-  windowTitle: 'MagisForm - Manipulação',
   caption: 'Manipulação',
 };
 
@@ -64,13 +63,5 @@ export const LOGO = {
     src: 'brand/logo-horizontal-white.svg',
     fallback: 'brand/symbol-white.svg',
   },
-  symbol: {
-    original: { src: 'brand/symbol-green.svg', fallback: null },
-    white: { src: 'brand/symbol-white.svg', fallback: null },
-  },
-  // Quando src for null, renderiza o CrossIcon + texto.
-  textParts: [
-    { text: 'Magis', color: COLORS.secondary },
-    { text: 'Form', color: COLORS.secondary },
-  ],
+  symbol: { src: 'brand/symbol-white.svg', fallback: null },
 };

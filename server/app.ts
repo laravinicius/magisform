@@ -18,21 +18,26 @@ const id = z.coerce.number().int().positive();
 const credentials = z.object({ username: z.string().trim().min(1).max(100), password: z.string().min(1).max(255) });
 const userInput = z.object({ name: z.string().trim().min(1).max(255), username: z.string().trim().min(1).max(100), password: z.string().min(1).max(255), role: z.enum(['employee','pharmacist','manager','admin']) });
 const userPatch = userInput.partial().refine((v) => Object.keys(v).length > 0);
-const customerInput = z.object({ name: z.string().trim().min(1).max(255), phone: z.string().max(30).nullable(), responsible_customer_id: id.nullable().optional() });
-const customerPatch = z.object({ name: customerInput.shape.name, phone: customerInput.shape.phone }).partial().refine((v) => Object.keys(v).length > 0);
 const insumoInput = z.union([z.string().trim().min(1).max(255), z.object({ name: z.string().trim().min(1).max(255) })]);
-const item = z.object({ insumo_id: id, quantity: z.coerce.number().positive(), unit: z.string().max(40).optional() });
-const budgetItem = z.object({ quantity: z.coerce.number().positive(), unit: z.string().trim().min(1).max(40), value: z.coerce.number().min(0), is_selected: z.union([z.boolean(), z.number().int().min(0).max(1)]).optional() });
-const formulaInput = z.object({ customer_id: id, attendant_name: z.string().trim().min(1).max(255), items: z.array(item).min(1).max(200), budget_number: z.string().max(20).optional(), budget_items: z.array(budgetItem).max(50).optional(), delivery_date: z.string().nullable().optional(), payment_status: z.string().max(30).optional(), partial_payment_amount: z.coerce.number().min(0).nullable().optional(), payment_method: z.string().max(40).nullable().optional(), delivery_status: z.string().max(40).optional(), cancel_reason: z.string().max(2000).nullable().optional(), status: z.enum(['pending','confirmed','cancelled','delivered']).optional() });
-const savedInput = z.object({ name: z.string().trim().min(1).max(255), budget_number: z.string().max(20).optional(), items: z.array(item).min(1).max(200), budget_items: z.array(budgetItem).max(50) });
 const admin = z.object({ username: z.string().trim().min(1).max(100), password: z.string().min(1).max(255) });
 const idParams = z.object({ id });
-const statusBody = z.object({ status: z.string().trim().min(1).max(40) });
-const deliveryBatch = z.object({ ids: z.array(id).min(1).max(500), status: z.string().trim().min(1).max(40) });
-const logQuery = z.object({ userId: z.string().regex(/^[1-9]\d*$/).optional(), action: z.string().max(100).optional(), entity: z.string().max(100).optional(), from: z.string().max(30).optional(), to: z.string().max(30).optional(), search: z.string().max(200).optional(), page: z.string().regex(/^\d+$/).optional(), pageSize: z.string().regex(/^\d+$/).optional() });
-const formulaQuery = z.object({ cursor: z.string().max(512).optional(), limit: z.string().regex(/^[1-9]\d*$/).refine((value) => Number(value) <= 100).optional(), statuses: z.string().max(100).optional(), deliveryStatus: z.string().max(40).optional(), search: z.string().max(100).optional() });
-const paymentUpdate = z.object({ payment_status: z.enum(['pago','parcial','pagar_na_retirada']), partial_payment_amount: z.number().nullable() });
-const formulaSummaryQuery = z.object({ paymentStatus: z.enum(['pago','parcial','pagar_na_retirada','nao_pago']).default('pago'), month: z.string().regex(/^(0|[1-9]|1[01])$/), year: z.string().regex(/^\d{4}$/) });
+const logQuery = z.object({ userId: z.string().regex(/^(?:0|[1-9]\d*)$/).optional(), action: z.string().max(100).optional(), entity: z.string().max(100).optional(), from: z.string().max(30).optional(), to: z.string().max(30).optional(), search: z.string().max(200).optional(), page: z.string().regex(/^\d+$/).optional(), pageSize: z.string().regex(/^\d+$/).optional() });
+const partnerName = z.object({ name: z.string().trim().min(1).max(255) });
+const partnerUser = z.object({ name: z.string().trim().min(1).max(255), username: z.string().trim().min(1).max(50), password: z.string().min(8).max(255) });
+const partnerUserPatch = z.object({ active: z.boolean().optional(), password: z.string().min(8).max(255).optional() }).refine(v => v.active !== undefined || v.password !== undefined);
+const precision = (digits: number) => (value: number) => Math.abs(value * 10 ** digits - Math.round(value * 10 ** digits)) < 0.00001;
+const orderQuantity = z.number().positive().max(9999999).refine(precision(3));
+const orderPrice = z.number().min(0).max(99999999).refine(precision(2));
+const orderData = z.object({
+  patient_name: z.string().trim().min(1).max(255), patient_phone: z.string().trim().max(30),
+  attendant_name: z.string().trim().min(1).max(255),
+  items: z.array(z.object({ name: z.string().trim().min(1).max(255), quantity: orderQuantity, unit: z.string().trim().min(1).max(16) })).min(1).max(200),
+  budget_number: z.string().trim().max(20),
+  budget_items: z.array(z.object({ quantity: orderQuantity, unit: z.string().trim().min(1).max(16), value: orderPrice, is_selected: z.union([z.boolean(), z.number().int().min(0).max(1)]).optional() })).max(50),
+  delivery_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => { const date = new Date(`${value}T00:00:00Z`); return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value; }).nullable(),
+}).refine(value => value.budget_items.filter(item => !!item.is_selected).length <= 1);
+const orderRevision = z.object({ revision: id, note: z.string().trim().max(2000).optional() });
+const orderProposal = orderRevision.extend({ data: orderData });
 
 type AppOptions = { config: ServerConfig; db?: Db; pool?: mysql.Pool; closePool?: boolean };
 
@@ -40,7 +45,7 @@ function codeFor(error: unknown): { status: number; code: string; message: strin
   if (error instanceof BusinessRuleError) return { status: error.status, code: error.status === 400 ? 'VALIDATION_ERROR' : error.status === 404 ? 'NOT_FOUND' : 'CONFLICT', message: error.message };
   const message = error instanceof Error ? error.message : '';
   if (/Sessão obrigatória|Sessão inválida|expirada|revogada/i.test(message)) return { status: 401, code: 'UNAUTHENTICATED', message: 'Sessão inválida ou expirada.' };
-  if (/permiss|autorizad|manager|gerente|privilégio|credenciais administrativas|restrito à administração/i.test(message)) return { status: 403, code: 'FORBIDDEN', message: 'Acesso não autorizado.' };
+  if (/permiss|autorizad|manager|gerente|privilégio|credenciais (?:administrativas|de administrador)|restrito à administração/i.test(message)) return { status: 403, code: 'FORBIDDEN', message: 'Acesso não autorizado.' };
   if (/não encontrado|não existe|inexistente/i.test(message)) return { status: 404, code: 'NOT_FOUND', message: 'Registro não encontrado.' };
   if (/conflito|já utilizado|duplicad|último|referência|em uso|só pode|não pode/i.test(message)) return { status: 409, code: 'CONFLICT', message: 'A operação não pode ser concluída por conflito com os dados atuais.' };
   if (/ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET|PROTOCOL_CONNECTION_LOST|EHOSTUNREACH|EAI_AGAIN|Sem conexão/i.test(message)) return { status: 503, code: 'UNAVAILABLE', message: 'Serviço temporariamente indisponível.' };
@@ -78,10 +83,7 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
       CookieAuth: { type: 'apiKey', in: 'cookie', name: '__Host-magisform_session' },
     }, schemas: {
       UserDto: { type: 'object', required: ['id','name','username','role'], properties: { id: { type: 'integer' }, name: { type: 'string' }, username: { type: 'string' }, role: { type: 'string', enum: ['employee','pharmacist','manager','admin'] } } },
-      CustomerDto: { type: 'object', required: ['id','name','phone'], properties: { id: { type: 'integer' }, name: { type: 'string' }, phone: { type: 'string', nullable: true }, responsible_id: { type: 'integer', nullable: true }, responsible_name: { type: 'string', nullable: true }, responsible_phone: { type: 'string', nullable: true }, created_at: { type: 'string' } } },
       InsumoDto: { type: 'object', required: ['id','name'], properties: { id: { type: 'integer' }, name: { type: 'string' }, created_at: { type: 'string' } } },
-      FormulaDto: { type: 'object', required: ['id','customer_id','attendant_name','status','created_at'], properties: { id: { type: 'integer' }, customer_id: { type: 'integer' }, customer_name: { type: 'string' }, customer_phone: { type: 'string' }, attendant_name: { type: 'string' }, status: { type: 'string', enum: ['pending','confirmed','cancelled','delivered'] }, created_at: { type: 'string' }, items: { type: 'array', items: { type: 'object' } }, budget_items: { type: 'array', items: { type: 'object' } }, delivered_at: { type: 'string', nullable: true } } },
-      SavedFormulaDto: { type: 'object', required: ['id','name','items'], properties: { id: { type: 'integer' }, name: { type: 'string' }, items: { type: 'array', items: { type: 'object' } }, budget_items: { type: 'array', items: { type: 'object' } } } },
       AuditLogDto: { type: 'object', required: ['id','action','entity','created_at'], properties: { id: { type: 'integer' }, user_id: { type: 'integer', nullable: true }, user_name: { type: 'string' }, action: { type: 'string' }, entity: { type: 'string' }, entity_id: { type: 'integer', nullable: true }, details: { type: 'string' }, created_at: { type: 'string' } } },
       PublicConfigDto: { type: 'object', required: ['installationName','brand','brandTheme','version','capabilities'], properties: { installationName: { type: 'string' }, brand: { type: 'string' }, brandTheme: { type: 'object', required: ['primary','secondary','background','surface','ink','muted'], properties: { primary: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' }, secondary: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' }, background: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' }, surface: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' }, ink: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' }, muted: { type: 'string', pattern: '^#[0-9a-fA-F]{6}$' } } }, version: { type: 'string' }, capabilities: { type: 'array', items: { type: 'string' } } } },
       DataEnvelope: { type: 'object', required: ['data'], properties: { data: {} } },
@@ -144,7 +146,7 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
     return db.withSessionContext(token, () => fn(token));
   };
   const data = <T>(value: T): DataEnvelopeDto<T> => ({ data: value });
-  const addRoute = (method: 'GET'|'POST'|'PATCH'|'DELETE', url: string, handler: (request: FastifyRequest, reply: any) => Promise<any>, opts: { mutating?: boolean; auth?: boolean; security?: boolean; schema?: any; validation?: z.ZodType<any>; queryValidation?: z.ZodType<any>; config?: any } = {}) => {
+  const addRoute = (method: 'GET'|'POST'|'PATCH'|'DELETE', url: string, handler: (request: FastifyRequest, reply: any) => Promise<any>, opts: { mutating?: boolean; auth?: boolean; internal?: boolean; security?: boolean; schema?: any; validation?: z.ZodType<any>; queryValidation?: z.ZodType<any>; config?: any } = {}) => {
     const bodySchema = opts.validation ? z.toJSONSchema(opts.validation, { target: 'draft-7' }) : undefined;
     const querySchema = opts.queryValidation ? z.toJSONSchema(opts.queryValidation, { target: 'draft-7' }) : undefined;
     const paramsSchema = url.includes('/:id') ? { type: 'object', properties: { id: { type: 'string', pattern: '^[1-9]\\d*$' } }, required: ['id'] } : undefined;
@@ -155,7 +157,7 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
       response: { 200: { type: 'object', properties: { data: {} }, required: ['data'] } }, ...opts.schema,
     }, config: opts.config, handler: async (request, reply) => {
       if (opts.mutating) guardMutation(request, url);
-      if (opts.auth) return withSession(request, async () => handler(request, reply), !url.startsWith('/auth/'));
+      if (opts.auth) return withSession(request, async () => { if (opts.internal) db.assertInternalSession(); return handler(request, reply); }, !url.startsWith('/auth/'));
       return handler(request, reply);
     } });
   };
@@ -179,7 +181,7 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
     try {
       await pool.query('SELECT 1');
       const [rows] = await pool.query<mysql.RowDataPacket[]>('SELECT version FROM schema_version WHERE singleton=1 LIMIT 1');
-      if (!rows.length || Number(rows[0].version) !== 3) throw new Error('Schema ausente ou incompatível');
+      if (!rows.length || Number(rows[0].version) !== 5) throw new Error('Schema ausente ou incompatível');
       return { data: { status: 'ready' } };
     }
     catch { return reply.code(503).send({ error: { code: 'UNAVAILABLE', message: 'Serviço temporariamente indisponível.', requestId: reply.request.id } }); }
@@ -207,7 +209,21 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
     await db.revokeSession(token); reply.clearCookie(sessionCookie, { path: '/', secure: config.secure, sameSite: 'lax' }); return data({ success: true });
   }), { mutating: true, security: true });
 
-  const common = { auth: true };
+  const common = { auth: true, internal: true };
+  const orderAuth = { auth: true };
+  addRoute('GET', '/partners', wrapped(async () => db.listPartnerPharmacies()), common);
+  addRoute('POST', '/partners', wrapped(async req => db.addPartnerPharmacy(parsed(partnerName, req.body).name)), { ...common, mutating: true, validation: partnerName });
+  addRoute('POST', '/partners/:id/users', wrapped(async req => db.addPartnerUser(paramId(req), parsed(partnerUser, req.body))), { ...common, mutating: true, validation: partnerUser });
+  addRoute('PATCH', '/partner-users/:id', wrapped(async req => db.updatePartnerUser(paramId(req), parsed(partnerUserPatch, req.body))), { ...common, mutating: true, validation: partnerUserPatch });
+  addRoute('GET', '/order-patients', wrapped(async () => db.listPartnerPatients()), orderAuth);
+  addRoute('GET', '/order-insumos', wrapped(async () => db.listInsumos()), orderAuth);
+  addRoute('GET', '/orders', wrapped(async () => db.listOrders()), orderAuth);
+  addRoute('GET', '/orders/:id', wrapped(async req => db.getOrder(paramId(req))), orderAuth);
+  addRoute('POST', '/orders', wrapped(async req => { const input = parsed(orderData, req.body); return db.addOrder({ ...input, delivery_date: input.delivery_date ?? null }); }), { ...orderAuth, mutating: true, validation: orderData });
+  for (const [path, action] of [['review','reviewed'],['accept','accepted'],['approve','approved'],['reject','rejected']] as const) {
+    addRoute('POST', `/orders/:id/${path}`, wrapped(async req => { const body = parsed(orderRevision, req.body); return db.transitionOrder(paramId(req), action, body.revision, undefined, body.note); }), { ...orderAuth, mutating: true, validation: orderRevision });
+  }
+  addRoute('POST', '/orders/:id/propose', wrapped(async req => { const body = parsed(orderProposal, req.body); return db.transitionOrder(paramId(req), 'proposed', body.revision, { ...body.data, delivery_date: body.data.delivery_date ?? null }, body.note); }), { ...orderAuth, mutating: true, validation: orderProposal });
   const crud = (path: string, list: () => Promise<any>, create: (v: any) => Promise<any>, update: (id: number, v: any) => Promise<any>, remove: (id: number, creds?: any) => Promise<any>, schema: z.ZodType<any>, patchSchema: z.ZodType<any>) => {
     addRoute('GET', path, wrapped(async () => list()), common);
     addRoute('POST', path, wrapped(async (req) => create(parsed(schema, req.body))), { ...common, mutating: true, validation: schema });
@@ -219,35 +235,7 @@ export async function buildApp({ config, db: providedDb, pool: providedPool, clo
     if (!current) return { success: false, error: 'Usuário não encontrado.' };
     return db.updateUser(i, { ...current, ...v });
   }, (i,v) => db.deleteUser(i,v), userInput, userPatch);
-  crud('/customers', () => db.listCustomers(), (v) => db.addCustomer(v), async (i,v) => {
-    const current = (await db.listCustomers()).find((entry: any) => entry.id === i);
-    if (!current) return { success: false, error: 'Cliente não encontrado.' };
-    return db.updateCustomer(i, { name: v.name ?? current.name, phone: v.phone === undefined ? current.phone : v.phone });
-  }, (i,v) => db.deleteCustomer(i,v), customerInput, customerPatch);
   crud('/insumos', () => db.listInsumos(), (v) => db.addInsumo(typeof v === 'string' ? v : v.name), (i,v) => db.updateInsumo(i, typeof v === 'string' ? v : v.name), (i,v) => db.deleteInsumo(i,v), insumoInput, insumoInput);
-  addRoute('GET', '/formulas', async (req, reply) => {
-    const q = parsed(formulaQuery, req.query);
-    if (!q.limit) return reply.code(426).send({ error: { code: 'CLIENT_UPDATE_REQUIRED', message: 'Atualize o MagisForm para a versão 0.2.8 ou superior para consultar fórmulas.' } });
-    const statuses = q.statuses ? q.statuses.split(',') : [];
-    if (statuses.some((status) => !['pending','confirmed','cancelled','delivered'].includes(status))) throw Object.assign(new Error('Filtro de status inválido.'), { statusCode: 400 });
-    return data(await db.listFormulas({ cursor: q.cursor, limit: Number(q.limit), statuses: statuses as any, deliveryStatus: q.deliveryStatus, search: q.search }));
-  }, { ...common, queryValidation: formulaQuery });
-  addRoute('GET', '/formulas-summary', wrapped(async (req) => { const q = parsed(formulaSummaryQuery, req.query); return db.getFormulaSummary(Number(q.month), Number(q.year), q.paymentStatus); }), common);
-  addRoute('GET', '/formulas/:id', wrapped(async (req) => db.getFormula(paramId(req))), common);
-  addRoute('POST', '/formulas', wrapped(async (req) => db.addFormula(parsed(formulaInput, req.body))), { ...common, mutating: true, validation: formulaInput });
-  addRoute('PATCH', '/formulas/:id', wrapped(async (req) => db.updateFormula(paramId(req), parsed(formulaInput, req.body))), { ...common, mutating: true, validation: formulaInput });
-  addRoute('DELETE', '/formulas/:id', wrapped(async (req) => db.deleteFormula(paramId(req), parsed(admin, req.body))), { ...common, mutating: true, validation: admin });
-  crud('/saved-formulas', () => db.listSavedFormulas(), (v) => db.addSavedFormula(v), async (i,v) => {
-    const current = (await db.listSavedFormulas()).find((entry: any) => entry.id === i);
-    if (!current) return { success: false, error: 'Modelo não encontrado.' };
-    return db.updateSavedFormula(i, { ...current, ...v });
-  }, (i,v) => db.deleteSavedFormula(i,v), savedInput, savedInput.partial().refine((v) => Object.keys(v).length > 0));
-  addRoute('PATCH','/formulas/:id/status', wrapped(async (req) => db.updateFormulaStatus(paramId(req), parsed(statusBody,req.body).status)), { ...common, mutating: true, validation: statusBody });
-  addRoute('PATCH','/formulas/:id/delivery-status', wrapped(async (req) => db.updateFormulaDeliveryStatus(paramId(req), parsed(statusBody,req.body).status)), { ...common, mutating: true, validation: statusBody });
-  addRoute('PATCH','/formulas/:id/payment', wrapped(async (req) => db.updateFormulaPayment(paramId(req), (() => { const payment = parsed(paymentUpdate,req.body); return { payment_status: payment.payment_status, partial_payment_amount: payment.partial_payment_amount ?? null }; })())), { ...common, mutating: true, validation: paymentUpdate });
-  addRoute('POST','/formulas/:id/verification', wrapped(async (req) => db.verifyFormula(paramId(req))), { ...common, mutating: true });
-  addRoute('DELETE','/formulas/:id/verification', wrapped(async (req) => db.unverifyFormula(paramId(req))), { ...common, mutating: true });
-  addRoute('PATCH','/formulas/delivery-status-batch', wrapped(async (req) => { const b = parsed(deliveryBatch,req.body); return db.updateFormulasDeliveryStatus(b.ids,b.status); }), { ...common, mutating: true, validation: deliveryBatch });
   addRoute('GET','/logs', wrapped(async (req) => {
     const q = parsed(logQuery, req.query);
     return db.listLogs({ userId: q.userId ? Number(q.userId) : undefined, action: q.action, entity: q.entity, from: q.from, to: q.to, search: q.search, page: q.page ? Number(q.page) : undefined, pageSize: q.pageSize ? Number(q.pageSize) : undefined });

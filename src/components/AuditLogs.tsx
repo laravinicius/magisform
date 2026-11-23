@@ -10,16 +10,19 @@ const ACTION_OPTIONS = [
   { value: 'add', label: 'Adicionar' },
   { value: 'update', label: 'Atualizar' },
   { value: 'delete', label: 'Excluir' },
-  { value: 'update_status', label: 'Alterar status' },
-  { value: 'update_delivery_status', label: 'Alterar andamento' },
+  { value: 'reviewed', label: 'Iniciar análise' },
+  { value: 'accepted', label: 'Aceitar pedido' },
+  { value: 'proposed', label: 'Propor alteração' },
+  { value: 'approved', label: 'Aprovar alteração' },
+  { value: 'rejected', label: 'Rejeitar alteração' },
 ];
 
 const ENTITY_OPTIONS = [
   { value: 'users', label: 'Usuários' },
-  { value: 'customers', label: 'Clientes' },
   { value: 'insumos', label: 'Insumos' },
-  { value: 'formulas', label: 'Fórmulas' },
-  { value: 'saved_formulas', label: 'Fórmulas salvadas' },
+  { value: 'orders', label: 'Pedidos' },
+  { value: 'partner_pharmacies', label: 'Farmácias' },
+  { value: 'partner_memberships', label: 'Acessos de farmácias' },
   { value: 'system', label: 'Sistema' },
 ];
 
@@ -124,7 +127,7 @@ export function AuditLogs() {
             {((users as any[]) ?? []).map(u => (
               <option key={u.id} value={u.id}>{u.name}</option>
             ))}
-            <option value={0}>Configuração</option>
+            <option value={0}>Sem usuário vinculado</option>
           </select>
         </div>
 

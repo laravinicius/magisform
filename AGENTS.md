@@ -106,3 +106,4 @@ A identidade segue `website/brand/GUIDE.md`. A fonte de cores do aplicativo é `
 4. Faça a menor alteração consistente; novo acesso a dados segue a cadeia service HTTP → API → core.
 5. Execute `npm run lint` e, quando bundling/empacotamento for afetado, `npm run build`.
 6. Atualize a documentação somente se uma fronteira arquitetural ou decisão mudar.
+7. Use exclusivamente a instalação hospedada no `srvteste` (`/home/administrador/magisform`, `https://magisform.duckdns.org`) para rodar o MagisForm em Docker. Ao concluir uma alteração na aplicação, incorpore-a à revisão instalada e gere uma imagem com nova tag. Guarde a imagem anterior para rollback, execute o preflight da candidata, recrie somente o serviço `app` e confirme a saúde, a API de prontidão e o build servido. Alterações de schema seguem o procedimento explícito em [database.md](docs/database.md).

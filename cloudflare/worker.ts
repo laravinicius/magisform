@@ -299,11 +299,6 @@ function canWrite(user: TenantUser): boolean { return user.role !== 'employee'; 
 function canManageUsers(user: TenantUser): boolean { return user.role !== 'employee'; }
 function canViewPrivileged(user: TenantUser): boolean { return ['admin','manager','pharmacist'].includes(user.role); }
 
-async function audit(env: Env, tenant: Tenant, user: TenantUser, action: string, entity: string, entityId: number | null, details: string | null = null) {
-  await env.DB.prepare('INSERT INTO action_logs(id,tenant_id,user_id,user_name,action,entity,entity_id,details) VALUES(?,?,?,?,?,?,?,?)')
-    .bind(databaseId(), tenant.id, user.id, user.name, action, entity, entityId, details).run();
-}
-
 function auditInsert(env: Env, tenant: Tenant, user: TenantUser, action: string, entity: string, entityId: number, details: string | null = null) {
   return env.DB.prepare('INSERT INTO action_logs(id,tenant_id,user_id,user_name,action,entity,entity_id,details) VALUES(?,?,?,?,?,?,?,?)')
     .bind(databaseId(), tenant.id, user.id, user.name, action, entity, entityId, details);

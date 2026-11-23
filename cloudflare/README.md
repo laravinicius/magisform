@@ -1,13 +1,13 @@
 # Piloto MagisForm na Cloudflare
 
-Esta é uma migração em andamento para Workers, Static Assets, D1 e Cloudflare Access. O runtime ainda **não está aprovado para publicação**: as rotas do Worker e o painel ganharam cobertura inicial em `workerd`, mas ainda faltam paridade integral com o produto, testes de navegador, revisão completa de papéis e configuração real da conta/Access. Use exclusivamente dados fictícios.
+Esta é uma migração em andamento para Workers, Static Assets, D1 e Cloudflare Access. O piloto implementa o contrato anterior e **ainda não oferece o fluxo atual de pedidos**; a tela da farmácia indica essa limitação. O runtime **não está aprovado para publicação**: precisa de adaptação para pedidos, testes de navegador, revisão completa de papéis e configuração real da conta/Access. Use exclusivamente dados fictícios.
 
 ## Arquitetura local
 
 - `worker.ts`: valida JWT RS256 do Access, resolve identidade, tenant, convites, sessões e CSRF; atende API de negócio e plataforma.
 - `migrations/`: migrations D1 ativas e versionadas; `schema.sql` é o snapshot gerado.
 - `tests/`: integração em `workerd` com D1, duas farmácias e chaves Access de teste.
-- `/`: seleção de farmácias vinculadas; `/t/{slug}/`: sistema da farmácia; `/management/`: gestão global.
+- `/`: seleção de farmácias vinculadas; `/t/{slug}/`: informa que o fluxo de pedidos ainda não está disponível; `/management/`: gestão global.
 - `wrangler.jsonc`: usa marcadores não implantáveis para D1 e Access; preencher somente na preparação aprovada da conta.
 
 ## Comandos locais

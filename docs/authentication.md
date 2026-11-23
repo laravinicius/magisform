@@ -26,7 +26,9 @@ As leituras iniciadas por navegação enviam `X-Magisform-Activity: user`; polli
 
 ## Perfis e permissões
 
-Roles: `employee`, `pharmacist`, `manager` e `admin`. Todas as operações de negócio exigem sessão. Leituras de pacientes/clientes, insumos e fórmulas aceitam qualquer usuário autenticado. Administração de usuários, auditoria e modelos salvos é restrita a `admin`, `manager` e `pharmacist`. As demais ações preservam a matriz da etapa 00. Verificação de fórmula é exclusiva do perfil `manager`, sem equivalência para os outros perfis privilegiados.
+Roles internos: `employee`, `pharmacist`, `manager` e `admin`. Todas as operações de negócio exigem sessão. A equipe interna autenticada atende pedidos e consulta insumos. Administração de usuários e auditoria é restrita a `admin`, `manager` e `pharmacist`.
+
+Usuários de farmácias solicitantes têm vínculo próprio em `partner_memberships`; o servidor obtém a farmácia da sessão, sem aceitar a identidade pelo payload. Eles acessam somente os pedidos e pacientes da própria farmácia, além do catálogo compartilhado de insumos; não acessam administração nem auditoria. A equipe interna atende pedidos; apenas a farmácia de origem aprova ou rejeita uma proposta. Administradores internos podem criar, desativar ou reativar esses acessos e trocar suas senhas; desativação ou troca de senha revoga a sessão.
 
 Operações de exclusão/alteração administrativa mantêm a reautenticação de credenciais já existente e usam como ator o usuário da sessão HTTP validada. Autoexclusão e remoção/rebaixamento do último acesso administrativo utilizável são bloqueados.
 
@@ -35,5 +37,3 @@ Operações de exclusão/alteração administrativa mantêm a reautenticação d
 A aplicação restaura a sessão por cookie após recarregar. O logout mantém confirmação e o fechamento da aba usa `beforeunload` quando há rascunho alterado. Links de WhatsApp abrem nova aba com `noopener,noreferrer`.
 
 Não existe modo especial de setup, configuração de conexão ou instalação de atualizações no navegador. O administrador inicial é criado pelo provisionamento explícito; o painel gerencia as instalações Docker.
-
-A atualização de pagamento no histórico exige sessão autenticada, com os mesmos perfis das mutações de fórmulas. O ator vem do contexto HTTP validado; o payload não estabelece identidade. Regra de negócio de pagamento usa erros explícitos 400/404/409, sem expor erros internos do MariaDB.

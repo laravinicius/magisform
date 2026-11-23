@@ -132,14 +132,6 @@ section[id] { scroll-margin-top: 110px; }
 .flow-bottom p { display: flex; align-items: center; gap: 10px; }
 .flow-bottom .text-link { color: var(--cream); }
 .gallery-section { background: var(--cream); }
-.gallery-card { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.gallery-image { position: relative; display: block; background: var(--sage); padding: 16px; transition: background-color 180ms; }
-.gallery-image:hover { background: #C9DCD1; }
-.gallery-image img { border-radius: 8px; border: 1px solid #C4D1C8; }
-.gallery-expand { display: grid; place-items: center; position: absolute; right: 24px; bottom: 24px; width: 44px; height: 44px; border-radius: 50%; background: var(--cream); color: var(--green); border: 1px solid var(--border); }
-.gallery-copy { padding: 24px; }
-.gallery-copy h3 { margin-block: 8px 12px; font-size: 26px; }
-.gallery-copy > p:last-child { font-size: 15px; color: var(--muted); }
 .gallery-disclaimer { margin-top: 24px; font-size: 12px; color: var(--muted); }
 .feature-navigation { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 40px; }
 .feature-navigation a { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 16px; border: 1px solid var(--border); border-radius: 100px; color: var(--green); font-size: 14px; }
@@ -320,8 +312,6 @@ details[open] .faq-plus::after { transform: rotate(0); }
   .flow-steps p { max-width: 270px; }
   .flow-bottom { margin-top: 28px; padding-top: 18px; }
   .flow-bottom p { align-items: flex-start; font-size: 13px; }
-  .gallery-image { padding: 14px; }
-  .gallery-copy { padding: 24px; }
   .gallery-disclaimer { font-size: 12px; }
   .feature-navigation { gap: 8px; margin-bottom: 28px; }
   .feature-navigation a { padding-inline: 12px; font-size: 13px; }

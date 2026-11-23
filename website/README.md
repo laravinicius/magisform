@@ -22,7 +22,7 @@ Abra http://127.0.0.1:5174/. O servidor fica acessível somente neste computador
 - `assets/fonts/`: fontes locais, originais e licenças SIL OFL.
 - `assets/images/`: capturas do aplicativo em WebP/AVIF e imagem de compartilhamento.
 - `brand/`: briefing, três conceitos, apresentação final e guia de identidade.
-- `tools/`: geração opcional das imagens, preparação de marca e verificações de arquivos.
+- `tools/`: conversão das capturas, preparação de marca e verificações de arquivos.
 
 ## Contato comercial
 
@@ -32,7 +32,7 @@ Sem uma configuração válida, os links levam à seção de contato e aparece �
 
 ## Conteúdo e imagens
 
-As imagens são capturas do renderer atual do MagisForm, com os mesmos componentes React, fontes, menus e estilos do aplicativo. A seção “O MagisForm na rotina da sua farmácia” explica seis áreas: visão geral, pedido e orçamento, produção e retirada, pagamentos, clientes e histórico com repetição de pedidos. Os recortes destacam detalhes da própria interface; a ampliação abre a tela completa, exceto o detalhe específico do pagamento.
+As imagens são capturas da versão anterior do MagisForm. A seção “O MagisForm na rotina da sua farmácia” mostra o fluxo daquela versão, com visão geral, pedido e orçamento, produção e retirada, pagamentos, clientes e histórico. A ampliação abre a tela completa, exceto o detalhe do pagamento. O [mapa de módulos](../docs/modules.md) descreve o fluxo atual de pedidos.
 
 Os dados são exclusivamente fictícios: clientes de exemplo, telefones sem uso, insumos genéricos e pedidos de demonstração. O exemplo de pagamento mostra um orçamento de R$ 180,00, R$ 72,00 recebidos e R$ 108,00 restantes. Os valores não são estatísticas comerciais. As imagens mostram o renderer em um navegador isolado; não representam capturas de uma instalação ligada ao banco da operação.
 
@@ -55,21 +55,13 @@ git diff --check
 
 Inspecione também o navegador em 375, 768, 1024 e 1440 px. Verifique menu, âncoras, FAQ com teclado, abertura/fechamento das prévias, Escape, foco restaurado e links de WhatsApp. O diálogo nativo possui tratamento explícito de Tab e Shift+Tab para manter o foco dentro da prévia enquanto ela está aberta. A folha CSS respeita `prefers-reduced-motion` e nenhum conteúdo depende de animação.
 
-As ferramentas de geração são opcionais e não são necessárias para servir o site. Para atualizar as capturas após mudanças na interface, instale as dependências do repositório e tenha Python, Node.js/npx e Google Chrome disponíveis. Execute na raiz:
-
-```powershell
-python website/tools/create-previews.py
-```
-
-O comando inicia um Vite separado em `127.0.0.1:5175`, com fixtures HTTP locais e captura o renderer via Playwright CLI. O servidor só fornece dados fictícios e bloqueia operações não previstas; o navegador bloqueia requisições externas. Não há conexão com MariaDB, leitura da configuração da operação, atualização do aplicativo ou envio de mensagens. A data do navegador fica em 06/10/2026 para manter os exemplos reproduzíveis. O processo fecha sua sessão de captura e o servidor ao terminar. A porta 5175 precisa estar livre.
-
-O npx obtém `@playwright/cli` se necessário, sem adicioná-lo às dependências do projeto. Os PNGs originais ficam em `assets/images/sources/`. `render-assets.cjs` converte essas capturas para WebP e AVIF em 960 e 1600 px e atualiza no HTML as dimensões reservadas. Para apenas reconverter os PNGs existentes:
+Os PNGs originais ficam em `assets/images/sources/`. O conversor gera as prévias responsivas em WebP e AVIF, as ampliações em WebP e atualiza as dimensões das imagens no HTML. Para reconverter os PNGs existentes, instale as dependências do repositório e execute na raiz:
 
 ```powershell
 node website/tools/render-assets.cjs --previews-only
 ```
 
-As ilustrações antigas não são mais fontes das telas. A geração de logos continua separada e exige fontTools/Pillow. Sem `--previews-only`, o renderizador também gera favicons e a imagem de compartilhamento.
+A geração de logos continua separada e exige fontTools/Pillow. Sem `--previews-only`, o conversor também gera favicons e a imagem de compartilhamento.
 
 Para repetir a verificação de navegação e responsividade com o servidor estático na porta 5174:
 

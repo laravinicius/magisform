@@ -65,16 +65,16 @@ try {
     const credentials = JSON.parse(output).admin;
     await ready(tenant);
     states.set(tenant.id, await login(tenant, credentials));
-    const created = await request(tenant, '/customers', 'POST', { name: `Paciente ${tenant.brand}`, phone: tenant === tenants[0] ? '5541999990001' : '5541999990002' }, states.get(tenant.id));
+    const created = await request(tenant, '/partners', 'POST', { name: `Solicitante ${tenant.brand}` }, states.get(tenant.id));
     assert.equal(created.status, 200);
     const publicConfig = await request(tenant, '/public-config');
     assert.equal(publicConfig.data.data.brand, tenant.brand);
     assert.deepEqual(publicConfig.data.data.capabilities, ['web']);
     console.log(`Provisionamento, login cookie/CSRF, CRUD e marca: ${tenant.id} aprovados.`);
   }
-  const crossed = await request(tenants[1], '/customers', 'GET', undefined, states.get(tenants[0].id));
+  const crossed = await request(tenants[1], '/partners', 'GET', undefined, states.get(tenants[0].id));
   assert.equal(crossed.status, 401);
-  const rowsB = await request(tenants[1], '/customers', 'GET', undefined, states.get(tenants[1].id));
+  const rowsB = await request(tenants[1], '/partners', 'GET', undefined, states.get(tenants[1].id));
   assert(!JSON.stringify(rowsB.data).includes(tenants[0].brand));
   for (const tenant of tenants) {
     const inspect = JSON.parse(await docker('inspect', `magisform-${tenant.id}-db-1`))[0];
@@ -105,9 +105,9 @@ try {
         assert.equal(info.State.Running, false);
       } else {
         await ready(tenant);
-        const rows = await request(tenant, '/customers', 'GET', undefined, states.get(tenant.id));
+        const rows = await request(tenant, '/partners', 'GET', undefined, states.get(tenant.id));
         assert.equal(rows.status, 200);
-        assert.equal(rows.data.data[0].name, `Paciente ${tenant.brand}`);
+        assert.equal(rows.data.data[0].name, `Solicitante ${tenant.brand}`);
       }
     }
     console.log(`Painel/API com Docker real: ${action} e persistência aprovados.`);

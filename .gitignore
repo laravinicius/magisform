@@ -46,7 +46,7 @@ db.txt
 info.txt
 
 .plans
-migrations/
+/migrations/
 
 # Docker
 docker-data/
@@ -91,3 +91,4 @@ manager-state/
 !docs/plans/progress/etapa-12.md
 !docs/plans/progress/etapa-13.md
 !docs/deployment/operations.md
+!docs/deployment/automatic-release.md

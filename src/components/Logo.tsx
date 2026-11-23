@@ -1,23 +1,23 @@
 import React from 'react';
 import { BRAND, COLORS, LOGO } from '../../config/branding';
 
-export function CrossIcon({ size = 22, color = COLORS.onSecondary }: { size?: number; color?: string }) {
+function CrossIcon({ size }: { size: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <rect x="10" y="2" width="4" height="20" rx="2" fill={color}/>
-      <rect x="2" y="10" width="20" height="4" rx="2" fill={color}/>
+      <rect x="10" y="2" width="4" height="20" rx="2" fill={COLORS.onSecondary}/>
+      <rect x="2" y="10" width="20" height="4" rx="2" fill={COLORS.onSecondary}/>
     </svg>
   );
 }
 
-function LogoImage({ sizePx, rounded = 'rounded-xl', fillWidth = false, variant = 'white' }: { sizePx: number; rounded?: string; fillWidth?: boolean; variant?: 'white' | 'original' }) {
+function LogoImage({ sizePx, fillWidth = false, variant }: { sizePx: number; fillWidth?: boolean; variant: 'white' | 'original' }) {
   const [useFallback, setUseFallback] = React.useState(false);
-  const asset = fillWidth ? LOGO[variant] : LOGO.symbol[variant];
+  const asset = fillWidth ? LOGO[variant] : LOGO.symbol;
   const src = useFallback ? asset.fallback : asset.src;
 
   if (!src) {
     return (
-      <div className={`flex items-center justify-center shrink-0 ${rounded}`}
+      <div className="flex items-center justify-center shrink-0 rounded-xl"
         style={{ width: sizePx, height: sizePx, background: COLORS.secondary }}>
         <CrossIcon size={Math.round(sizePx * 0.55)} />
       </div>
@@ -31,7 +31,7 @@ function LogoImage({ sizePx, rounded = 'rounded-xl', fillWidth = false, variant 
   );
 }
 
-export function BrandLogo({ size = 'md' }: { size?: 'icon' | 'md' | 'lg' | 'sidebar' }) {
+export function BrandLogo({ size }: { size: 'icon' | 'lg' | 'sidebar' }) {
   const publicBrand = document.documentElement.dataset.publicBrand;
   const caption = publicBrand && publicBrand !== BRAND.name ? publicBrand : BRAND.caption;
   if (size === 'icon') return <LogoImage sizePx={40} variant="white" />;
@@ -45,23 +45,10 @@ export function BrandLogo({ size = 'md' }: { size?: 'icon' | 'md' | 'lg' | 'side
     );
   }
 
-  if (size === 'lg') {
-    return (
-      <div className="flex flex-col items-center gap-2"><LogoImage sizePx={300} fillWidth variant="original" />{caption !== BRAND.caption && <span className="text-sm text-muted font-medium tracking-wide">{caption}</span>}</div>
-    );
-  }
-
   return (
-    <div className="flex items-center gap-3">
-      <LogoImage sizePx={40} variant="original" />
-      <div>
-        <div className="font-black text-lg leading-tight tracking-tight" style={{ fontFamily: 'var(--font-sans)' }}>
-          {LOGO.textParts.map((part, i) => (
-            <span key={i} style={{ color: part.color }}>{part.text}</span>
-          ))}
-        </div>
-        <div className="text-[10px] text-muted font-medium tracking-widest uppercase leading-tight">{caption}</div>
-      </div>
+    <div className="flex flex-col items-center gap-2">
+      <LogoImage sizePx={300} fillWidth variant="original" />
+      {caption !== BRAND.caption && <span className="text-sm text-muted font-medium tracking-wide">{caption}</span>}
     </div>
   );
 }

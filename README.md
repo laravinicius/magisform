@@ -1,8 +1,10 @@
 # MagisForm
 
-Sistema exclusivamente web para o fluxo de manipulação farmacêutica, do orçamento à entrega. React 19, Vite, TypeScript, Tailwind CSS v4, API Fastify e MariaDB. O acesso é pelo navegador; não há aplicativo Electron, instalador Windows ou atualizador desktop.
+Sistema web de pedidos entre farmácias solicitantes e farmácias de manipulação. React 19, Vite, TypeScript, Tailwind CSS v4, API Fastify e MariaDB. O acesso é pelo navegador; não há aplicativo Electron, instalador Windows ou atualizador desktop.
 
 Cada cliente possui uma instalação Docker isolada, com aplicação, banco, volume, segredos e redes próprios. O painel central gerencia o provisionamento e as ações de iniciar, parar e reiniciar. O Nginx Proxy Manager publica os endereços HTTPS.
+
+Cada instalação representa uma manipulação e pode receber pedidos de várias farmácias solicitantes. A equipe cadastra as farmácias e seus acessos; cada solicitante acompanha apenas seus pedidos. Alterações propostas pela manipulação exigem aprovação da farmácia e ficam registradas no histórico.
 
 ## Desenvolvimento
 
@@ -28,9 +30,10 @@ Bootstrap e upgrades de banco são operações explícitas. Consulte [banco](doc
 | `npm run manager:setup` / `npm run manager:api` | Configuração explícita e execução do painel |
 | `npm run tenant:provision -- <id> <host> --image <imagem-aprovada>` | Preparação de instalação isolada; `--apply` executa o provisionamento |
 | `npm run lint` / `npm run lint:server` | Verificação TypeScript |
-| `npm test` | Testes unitários; integrações exigem MariaDB configurado |
+| `npm test` | Testes unitários e testes do piloto Cloudflare com D1 local |
 | `npm run test:integration` | MariaDB Docker descartável e testes de integração |
 | `npm run test:docker` | QA com dois clientes descartáveis e ações reais do painel; compila a imagem QA local e exige Docker disponível |
+| `npm run release:patch` | Testa, incrementa a versão patch e envia o commit e a tag final |
 | `npm run clean` | Remove somente `dist-web`, `dist-server` e `dist-manager` |
 
 ## Arquitetura e implantação
@@ -53,8 +56,9 @@ O navegador usa cookie HttpOnly e CSRF. Não recebe credenciais MariaDB nem toke
 - [Instalações por cliente](docs/deployment/tenant-installations.md).
 - [Painel de gerenciamento](docs/deployment/management-console.md) e [instalação do gerenciador](docs/deployment/manager-installation-runbook.md).
 - [Operação e recuperação](docs/deployment/operations.md).
+- [Releases por tag e atualização da instalação independente](docs/deployment/automatic-release.md).
 
-`Dockerfile` gera a imagem web/API; `Dockerfile.manager` gera a imagem do painel/executor. Os builds não publicam imagens. Segredos, catálogos operacionais e volumes não devem entrar no Git.
+`Dockerfile` gera a imagem web/API; `Dockerfile.manager` gera a imagem do painel/executor. Builds locais não publicam imagens; a release versionada publica a imagem web/API no GitHub. Segredos, catálogos operacionais e volumes não devem entrar no Git.
 
 O site institucional independente está em `website/`. A identidade visual usa `config/branding.ts`, fontes locais e os vetores aprovados em `public/brand/`.
 

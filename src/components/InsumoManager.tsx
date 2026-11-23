@@ -93,10 +93,10 @@ export function InsumoManager({ compact = false, onCreated, initialName }: { com
     setDeleteModalOpen(true);
   };
 
-  const handleDeleteConfirm = async () => {
+  const handleDeleteConfirm = async (credentials: { username: string; password: string }) => {
     if (pendingDeleteId === null) return;
-    const res: any = await db.insumos.remove(pendingDeleteId);
-    if (!res?.success) { setFormError(res?.error ?? 'Erro ao excluir.'); return; }
+    const res: any = await db.insumos.remove(pendingDeleteId, credentials);
+    if (!res?.success) throw new Error(res?.error ?? 'Erro ao excluir.');
     reload();
     setPendingDeleteId(null);
   };

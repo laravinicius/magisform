@@ -19,3 +19,7 @@ O painel e executor mantêm autenticação própria. Somente o executor acessa o
 Bootstrap e upgrade exigem comando explícito; pool, requests e inicialização não executam DDL. A remoção desktop não altera o schema nem checksums históricos.
 
 A apresentação usa `config/branding.ts`, `src/index.css`, fontes locais e vetores aprovados. A marca pública da instalação vem de `/api/v1/public-config`.
+
+Cada instalação MariaDB representa uma manipulação e pode cadastrar várias farmácias solicitantes. Um usuário vinculado a uma farmácia acessa somente as rotas de pedidos, os pacientes da própria farmácia e o catálogo de insumos. O servidor resolve o vínculo a partir da sessão e aplica o filtro em cada leitura e mudança.
+
+O pedido mantém cópias da solicitação original, dos dados atuais e da proposta pendente. Envio, atendimento, aprovação e rejeição registram eventos na mesma transação; a revisão impede decisões sobre dados desatualizados. O aceite do pedido não inicia produção automaticamente. O schema v5 remove as entidades do fluxo anterior e preserva os pedidos e seus históricos.
